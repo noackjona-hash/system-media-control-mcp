@@ -104,6 +104,61 @@ const toolsList = [
             },
             required: ["action"]
         }
+    },
+    {
+        name: "system_power_control",
+        description: "Control Windows system power options (lock screen, sleep/suspend, schedule shutdown, schedule restart, abort shutdown).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["lock", "sleep", "shutdown", "restart", "abort_shutdown"],
+                    description: "The power operation to perform. Note: shutdown/restart will schedule the action in 60 seconds."
+                }
+            },
+            required: ["action"]
+        }
+    },
+    {
+        name: "get_brightness",
+        description: "Get the current screen brightness level (0 to 100) if supported (typically laptops).",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "set_brightness",
+        description: "Set the screen brightness level (0 to 100) if supported.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                level: {
+                    type: "number",
+                    minimum: 0,
+                    maximum: 100,
+                    description: "Brightness percentage from 0 to 100."
+                }
+            },
+            required: ["level"]
+        }
+    },
+    {
+        name: "get_battery_status",
+        description: "Get battery status, remaining power percentage, charging/AC state, and estimated runtime (supported on laptops).",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_top_processes",
+        description: "Get the top 5 running processes consuming the most CPU percentage.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
     }
 ];
 
@@ -329,6 +384,151 @@ async function callTool(name, args) {
             `;
             await runPowerShell(script);
             return `Media action '${action}' successfully triggered.`;
+        }
+        
+        case "system_power_control": {
+            const action = args.action;
+            let script = '';
+            let msg = '';
+            if (action === "lock") {
+                script = 'rundll32.exe user32.dll,LockWorkStation';
+                msg = "Workstation locked successfully.";
+            } else if (action === "sleep") {
+                script = `
+                    Add-Type -Assembly System.Windows.Forms -ErrorAction SilentlyContinue
+                    [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)
+                `;
+                msg = "System put to sleep successfully.";
+            } else if (action === "shutdown") {
+                script = 'shutdown.exe /s /t 60';
+                msg = "Shutdown scheduled in 60 seconds. Use action 'abort_shutdown' to cancel.";
+            } else if (action === "restart") {
+                script = 'shutdown.exe /r /t 60';
+                msg = "Restart scheduled in 60 seconds. Use action 'abort_shutdown' to cancel.";
+            } else if (action === "abort_shutdown") {
+                script = 'shutdown.exe /a';
+                msg = "Scheduled power actions aborted successfully.";
+            } else {
+                throw new Error(`Unknown power action: ${action}`);
+            }
+            await runPowerShell(script);
+            return msg;
+        }
+        
+        case "get_brightness": {
+            const script = `
+                try {
+                    $brightnessObj = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop
+                    $result = @{
+                        supported = $true
+                        brightness = $brightnessObj.CurrentBrightness
+                    }
+                } catch {
+                    $result = @{
+                        supported = $false
+                        brightness = $null
+                    }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.supported) {
+                return "Screen brightness control is not supported on this device (it might be a Desktop PC without WMI monitor integration).";
+            }
+            return `Current Screen Brightness: ${data.brightness}%`;
+        }
+        
+        case "set_brightness": {
+            const level = Number(args.level);
+            if (isNaN(level) || level < 0 || level > 100) {
+                throw new Error("Invalid brightness level. Must be between 0 and 100.");
+            }
+            const script = `
+                try {
+                    $methods = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop
+                    $methods.WmiSetBrightness(1, ${level})
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to set screen brightness: ${data.error || 'Control not supported'}`);
+            }
+            return `Screen brightness set to ${level}% successfully.`;
+        }
+        
+        case "get_battery_status": {
+            const script = `
+                $battery = Get-CimInstance -ClassName Win32_Battery
+                if ($battery) {
+                    $statusMap = @{
+                        1 = "Discharging"
+                        2 = "AC power (Fully charged)"
+                        3 = "Fully Charged"
+                        4 = "Low"
+                        5 = "Critical"
+                        6 = "Charging"
+                        7 = "Charging and High"
+                        8 = "Charging and Low"
+                        9 = "Charging and Critical"
+                        10 = "Undefined"
+                        11 = "Partially charged"
+                    }
+                    $statusStr = $statusMap[[int]$battery.BatteryStatus]
+                    if (-not $statusStr) { $statusStr = "Unknown" }
+                    $result = @{
+                        detected = $true
+                        percent = $battery.EstimatedChargeRemaining
+                        status = $statusStr
+                        remainingMinutes = $battery.EstimatedRunTime
+                    }
+                } else {
+                    $result = @{
+                        detected = $false
+                        percent = $null
+                        status = "No battery detected (likely a desktop PC)"
+                        remainingMinutes = $null
+                    }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.detected) {
+                return "Battery status: No battery detected (this appears to be a desktop PC running on constant AC power).";
+            }
+            const runtimeStr = data.remainingMinutes ? `, Estimated remaining time: ${data.remainingMinutes} minutes` : '';
+            return `Battery Status: ${data.percent}% charge (${data.status})${runtimeStr}.`;
+        }
+        
+        case "get_top_processes": {
+            const script = `
+                $processes = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object { $_.Name -ne '_Total' -and $_.Name -ne 'Idle' } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 5 -Property Name, IDProcess, PercentProcessorTime
+                $list = @()
+                foreach ($p in $processes) {
+                    $list += @{
+                        name = $p.Name
+                        pid = $p.IDProcess
+                        cpuPercent = $p.PercentProcessorTime
+                    }
+                }
+                $list | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const list = JSON.parse(out);
+            if (!Array.isArray(list) || list.length === 0) {
+                return "Could not retrieve process list or no active processes found.";
+            }
+            let responseText = "Top 5 CPU consuming processes:\n";
+            list.forEach((p, idx) => {
+                responseText += `${idx + 1}. Process: ${p.name} (PID: ${p.pid}) - CPU Load: ${p.cpuPercent}%\n`;
+            });
+            return responseText.trim();
         }
         
         default:

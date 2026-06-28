@@ -7,39 +7,64 @@ const OpenAI = require('openai');
 // Path to the MCP Server
 const SERVER_PATH = './server.js';
 
-// Spawns the MCP Server process
-console.log(`[Client] Starting MCP Server: node ${SERVER_PATH}...`);
+// ANSI Console Colors
+const COLORS = {
+    reset: "\x1b[0m",
+    bright: "\x1b[1m",
+    dim: "\x1b[2m",
+    red: "\x1b[31m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    blue: "\x1b[34m",
+    magenta: "\x1b[35m",
+    cyan: "\x1b[36m",
+    white: "\x1b[37m"
+};
+
+// Logging helpers
+function logInfo(msg) {
+    console.log(`${COLORS.green}${COLORS.bright}[Client]${COLORS.reset} ${msg}`);
+}
+function logStep(msg) {
+    console.log(`${COLORS.yellow}${COLORS.bright}[Step]${COLORS.reset} ${msg}`);
+}
+function logTool(msg) {
+    console.log(`${COLORS.cyan}${COLORS.bright}[Tool Call]${COLORS.reset} ${msg}`);
+}
+function logError(msg) {
+    console.error(`${COLORS.red}${COLORS.bright}[Error]${COLORS.reset} ${msg}`);
+}
+function logServer(msg) {
+    console.error(`${COLORS.magenta}[Server Log]${COLORS.reset} ${msg}`);
+}
+
+logInfo(`Starting MCP Server: node ${SERVER_PATH}...`);
 const serverProcess = spawn('node', [SERVER_PATH]);
 
-// Setup readline interface for reading responses from the server's stdout
 const serverRl = readline.createInterface({
     input: serverProcess.stdout,
     terminal: false
 });
 
-// Print server's stderr logs directly to client's console for visibility
 serverProcess.stderr.on('data', (data) => {
-    console.error(`[Server Log] ${data.toString().trim()}`);
+    logServer(data.toString().trim());
 });
 
 serverProcess.on('exit', (code) => {
-    console.log(`[Client] MCP Server process exited with code ${code}`);
+    logInfo(`MCP Server process exited with code ${code}`);
     process.exit(code);
 });
 
-// JSON-RPC message tracker
+// JSON-RPC state
 let nextRequestId = 1;
 const pendingRequests = new Map();
 
-// Read line-by-line responses from the MCP server stdout
 serverRl.on('line', (line) => {
     line = line.trim();
     if (!line) return;
     
     try {
         const message = JSON.parse(line);
-        
-        // Match response to pending request using the 'id'
         if (message.id !== undefined && pendingRequests.has(message.id)) {
             const { resolve, reject } = pendingRequests.get(message.id);
             pendingRequests.delete(message.id);
@@ -49,15 +74,12 @@ serverRl.on('line', (line) => {
             } else {
                 resolve(message.result);
             }
-        } else {
-            console.log(`[Client] Received notification/unhandled message from server:`, message);
         }
     } catch (err) {
-        console.error(`[Client] Error parsing message from server: ${err.message}. Raw: ${line}`);
+        logError(`Error parsing server message: ${err.message}. Raw: ${line}`);
     }
 });
 
-// Sends a JSON-RPC request and returns a Promise resolving to the result
 function sendRequest(method, params = {}) {
     return new Promise((resolve, reject) => {
         const id = nextRequestId++;
@@ -72,7 +94,6 @@ function sendRequest(method, params = {}) {
     });
 }
 
-// Sends a JSON-RPC notification (no response expected)
 function sendNotification(method, params = {}) {
     const notification = {
         jsonrpc: "2.0",
@@ -82,7 +103,6 @@ function sendNotification(method, params = {}) {
     serverProcess.stdin.write(JSON.stringify(notification) + '\n');
 }
 
-// Helper to call a tool on the MCP server
 async function callMcpTool(name, args) {
     const result = await sendRequest("tools/call", {
         name,
@@ -94,9 +114,8 @@ async function callMcpTool(name, args) {
     return JSON.stringify(result);
 }
 
-// Perform client-server handshake
 async function runHandshake() {
-    console.log("[Client] Sending 'initialize' request to MCP server...");
+    logStep("Sending 'initialize' request to MCP server...");
     const initResult = await sendRequest("initialize", {
         protocolVersion: "2024-11-05",
         capabilities: {},
@@ -105,22 +124,18 @@ async function runHandshake() {
             version: "1.0.0"
         }
     });
-    console.log(`[Client] Connection initialized. Server name: ${initResult.serverInfo.name}, version: ${initResult.serverInfo.version}`);
+    logInfo(`Connection initialized. Server: ${initResult.serverInfo.name} (${initResult.serverInfo.version})`);
 
-    console.log("[Client] Sending 'notifications/initialized' notification...");
+    logStep("Sending 'notifications/initialized' notification...");
     sendNotification("notifications/initialized");
 
-    console.log("[Client] Requesting tool list...");
+    logStep("Requesting tool list...");
     const toolsResult = await sendRequest("tools/list");
     return toolsResult.tools || [];
 }
 
-// Handles integration with Gemini API
 async function runGemini(apiKey, query, mcpTools) {
-    console.log("[Client] Initializing Gemini client...");
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // Map MCP Tools to Gemini Function Declarations
     const functionDeclarations = mcpTools.map(tool => ({
         name: tool.name,
         description: tool.description,
@@ -133,23 +148,19 @@ async function runGemini(apiKey, query, mcpTools) {
     });
 
     const chat = model.startChat();
-    console.log(`[Client] Sending prompt to Gemini: "${query}"`);
+    logInfo(`Sending prompt to Gemini: "${query}"`);
     let result = await chat.sendMessage(query);
     let response = result.response;
     
-    // Process function call loop in case Gemini decides to run tools sequentially
     let calls = response.functionCalls();
     while (calls && calls.length > 0) {
         const functionResponses = [];
         
         for (const call of calls) {
-            console.log(`\n[Client] [Gemini Tool Call] Gemini requested tool: ${call.name}`);
-            console.log(`[Client] Arguments:`, JSON.stringify(call.args));
-            
+            logTool(`Gemini requested: ${COLORS.bright}${call.name}${COLORS.reset} with args: ${JSON.stringify(call.args)}`);
             try {
-                // Call the MCP Server
                 const toolOutput = await callMcpTool(call.name, call.args);
-                console.log(`[Client] MCP Server output: "${toolOutput.replace(/\n/g, ' ')}"`);
+                logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
                 
                 functionResponses.push({
                     functionResponse: {
@@ -158,7 +169,7 @@ async function runGemini(apiKey, query, mcpTools) {
                     }
                 });
             } catch (err) {
-                console.error(`[Client] Error calling MCP tool: ${err.message}`);
+                logError(`MCP execution failed: ${err.message}`);
                 functionResponses.push({
                     functionResponse: {
                         name: call.name,
@@ -168,21 +179,17 @@ async function runGemini(apiKey, query, mcpTools) {
             }
         }
         
-        console.log(`[Client] Feeding tool results back to Gemini...`);
+        logStep(`Feeding tool results back to Gemini...`);
         result = await chat.sendMessage(functionResponses);
         response = result.response;
         calls = response.functionCalls();
     }
     
-    console.log(`\n[Client] Gemini Final Response:\n=================================\n${response.text()}\n=================================`);
+    console.log(`\n${COLORS.green}${COLORS.bright}Gemini Final Response:${COLORS.reset}\n=================================\n${response.text()}\n=================================`);
 }
 
-// Handles integration with OpenAI API
 async function runOpenAI(apiKey, query, mcpTools) {
-    console.log("[Client] Initializing OpenAI client...");
     const openai = new OpenAI({ apiKey });
-    
-    // Map MCP Tools to OpenAI tools schema
     const tools = mcpTools.map(tool => ({
         type: "function",
         function: {
@@ -192,13 +199,11 @@ async function runOpenAI(apiKey, query, mcpTools) {
         }
     }));
 
-    const messages = [
-        { role: "user", content: query }
-    ];
-
+    const messages = [{ role: "user", content: query }];
     let running = true;
+    
     while (running) {
-        console.log(`[Client] Sending request to OpenAI...`);
+        logStep(`Sending request to OpenAI...`);
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages,
@@ -214,12 +219,10 @@ async function runOpenAI(apiKey, query, mcpTools) {
                 const name = toolCall.function.name;
                 const args = JSON.parse(toolCall.function.arguments);
                 
-                console.log(`\n[Client] [OpenAI Tool Call] OpenAI requested tool: ${name}`);
-                console.log(`[Client] Arguments:`, JSON.stringify(args));
-                
+                logTool(`OpenAI requested: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
                 try {
                     const toolOutput = await callMcpTool(name, args);
-                    console.log(`[Client] MCP Server output: "${toolOutput.replace(/\n/g, ' ')}"`);
+                    logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
                     
                     messages.push({
                         role: "tool",
@@ -228,7 +231,7 @@ async function runOpenAI(apiKey, query, mcpTools) {
                         content: toolOutput
                     });
                 } catch (err) {
-                    console.error(`[Client] Error calling MCP tool: ${err.message}`);
+                    logError(`MCP execution failed: ${err.message}`);
                     messages.push({
                         role: "tool",
                         tool_call_id: toolCall.id,
@@ -238,16 +241,14 @@ async function runOpenAI(apiKey, query, mcpTools) {
                 }
             }
         } else {
-            console.log(`\n[Client] OpenAI Final Response:\n=================================\n${message.content}\n=================================`);
+            console.log(`\n${COLORS.green}${COLORS.bright}OpenAI Final Response:${COLORS.reset}\n=================================\n${message.content}\n=================================`);
             running = false;
         }
     }
 }
 
-// Handles mock AI execution when no API keys are present (useful for offline testing)
 async function runMockAI(query, mcpTools) {
-    console.log(`\n[Client] [Mock Mode] No API keys configured. Running in Mock AI Mode.`);
-    console.log(`[Client] [Mock Mode] Analyzing query: "${query}"`);
+    logInfo(`[Mock Mode] No API keys configured. Running locally.`);
     
     let toolName = null;
     let toolArgs = {};
@@ -273,75 +274,110 @@ async function runMockAI(query, mcpTools) {
     } else if (lowerQuery.includes('zurück') || lowerQuery.includes('prev')) {
         toolName = 'media_control';
         toolArgs = { action: 'prev_track' };
+    } else if (lowerQuery.includes('prozess') || lowerQuery.includes('task') || lowerQuery.includes('cpu consuming') || lowerQuery.includes('auslastung')) {
+        toolName = 'get_top_processes';
+    } else if (lowerQuery.includes('akku') || lowerQuery.includes('battery') || lowerQuery.includes('lade')) {
+        toolName = 'get_battery_status';
+    } else if (lowerQuery.includes('helligkeit') || lowerQuery.includes('brightness')) {
+        const match = lowerQuery.match(/(\d+)/);
+        if (match) {
+            toolName = 'set_brightness';
+            toolArgs = { level: Number(match[1]) };
+        } else {
+            toolName = 'get_brightness';
+        }
+    } else if (lowerQuery.includes('sperr') || lowerQuery.includes('lock')) {
+        toolName = 'system_power_control';
+        toolArgs = { action: 'lock' };
+    } else if (lowerQuery.includes('sleep') || lowerQuery.includes('ruhezustand')) {
+        toolName = 'system_power_control';
+        toolArgs = { action: 'sleep' };
+    } else if (lowerQuery.includes('herunterfahren') || lowerQuery.includes('shutdown')) {
+        toolName = 'system_power_control';
+        toolArgs = { action: 'shutdown' };
+    } else if (lowerQuery.includes('neustart') || lowerQuery.includes('restart')) {
+        toolName = 'system_power_control';
+        toolArgs = { action: 'restart' };
+    } else if (lowerQuery.includes('abbrechen') || lowerQuery.includes('abort')) {
+        toolName = 'system_power_control';
+        toolArgs = { action: 'abort_shutdown' };
     } else if (lowerQuery.includes('ausgelastet') || lowerQuery.includes('status') || lowerQuery.includes('system') || lowerQuery.includes('pc')) {
         toolName = 'get_system_status';
     }
     
     if (toolName) {
-        console.log(`\n[Client] [Mock Tool Call] Mock AI requested tool: ${toolName}`);
-        console.log(`[Client] Arguments:`, JSON.stringify(toolArgs));
-        
+        logTool(`Mock AI requested: ${COLORS.bright}${toolName}${COLORS.reset} with args: ${JSON.stringify(toolArgs)}`);
         try {
             const toolOutput = await callMcpTool(toolName, toolArgs);
-            console.log(`[Client] MCP Server output: "${toolOutput.replace(/\n/g, ' ')}"`);
-            
-            console.log(`\n[Client] Mock AI Final Response:\n=================================\n[Mock AI] Hier ist das Ergebnis der Aktion: ${toolOutput}\n=================================`);
+            console.log(`\n${COLORS.green}${COLORS.bright}Mock AI Final Response:${COLORS.reset}\n=================================\n${toolOutput}\n=================================`);
         } catch (err) {
-            console.error(`[Client] Error calling MCP tool: ${err.message}`);
+            logError(`Mock execution failed: ${err.message}`);
         }
     } else {
-        console.log(`\n[Client] Mock AI Final Response:\n=================================\n[Mock AI] Ich habe deine Anfrage verstanden: "${query}". Ich benötige dafür kein Tool.\n=================================`);
+        console.log(`\n${COLORS.green}${COLORS.bright}Mock AI Final Response:${COLORS.reset}\n=================================\n[Mock AI] I understood: "${query}". No tools required.\n=================================`);
     }
 }
 
-// Main client entrypoint
 async function main() {
     try {
-        // Step 1: Handshake with MCP Server to fetch tools list
         const mcpTools = await runHandshake();
-        console.log(`[Client] Discovered ${mcpTools.length} tools from server:`, mcpTools.map(t => t.name).join(', '));
+        logInfo(`Discovered ${mcpTools.length} tools from server: ${mcpTools.map(t => t.name).join(', ')}`);
         
-        // Step 2: Get user query (either command-line argument or interactive console prompt)
+        const geminiKey = process.env.GEMINI_API_KEY;
+        const openAIKey = process.env.OPENAI_API_KEY;
+        
         let query = process.argv.slice(2).join(' ').trim();
         
-        if (!query) {
-            console.log('\n[Client] No prompt provided via command line args. Entering interactive prompt...');
-            const rlInterface = readline.createInterface({
+        if (query) {
+            // Single-shot run mode via CLI args
+            if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
+                await runGemini(geminiKey, query, mcpTools);
+            } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
+                await runOpenAI(openAIKey, query, mcpTools);
+            } else {
+                await runMockAI(query, mcpTools);
+            }
+        } else {
+            // Interactive persistent loop
+            console.log(`\n${COLORS.yellow}${COLORS.bright}--- PC Agent Interactive Prompt Mode ---${COLORS.reset}`);
+            console.log(`Type queries in natural language (e.g. "Wie ausgelastet ist mein PC?" or "Mute").`);
+            console.log(`Type ${COLORS.bright}'exit'${COLORS.reset} or ${COLORS.bright}'q'${COLORS.reset} to quit.\n`);
+            
+            const userRl = readline.createInterface({
                 input: process.stdin,
                 output: process.stdout
             });
             
-            query = await new Promise((resolve) => {
-                rlInterface.question('\nEnter your request (e.g. "Wie ausgelastet ist mein PC?" or "Mute the volume"): ', (answer) => {
-                    rlInterface.close();
-                    resolve(answer.trim());
+            while (true) {
+                const answer = await new Promise((resolve) => {
+                    userRl.question(`${COLORS.bright}${COLORS.white}Ask Agent > ${COLORS.reset}`, resolve);
                 });
-            });
+                const trimmed = answer.trim();
+                
+                if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'q' || trimmed.toLowerCase() === 'quit') {
+                    break;
+                }
+                if (!trimmed) continue;
+                
+                try {
+                    if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
+                        await runGemini(geminiKey, trimmed, mcpTools);
+                    } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
+                        await runOpenAI(openAIKey, trimmed, mcpTools);
+                    } else {
+                        await runMockAI(trimmed, mcpTools);
+                    }
+                } catch (e) {
+                    logError(`Failed to process request: ${e.message}`);
+                }
+                console.log(); // empty spacing line
+            }
+            userRl.close();
         }
-        
-        if (!query) {
-            console.log("[Client] Empty query. Exiting.");
-            serverProcess.kill();
-            process.exit(0);
-        }
-        
-        // Step 3: Choose API provider based on env variables
-        const geminiKey = process.env.GEMINI_API_KEY;
-        const openAIKey = process.env.OPENAI_API_KEY;
-        
-        if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
-            await runGemini(geminiKey, query, mcpTools);
-        } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
-            await runOpenAI(openAIKey, query, mcpTools);
-        } else {
-            // Fallback to Mock AI Mode for testing
-            await runMockAI(query, mcpTools);
-        }
-        
     } catch (err) {
-        console.error(`[Client] Fatal Error in Client execution: ${err.message}`, err);
+        logError(`Fatal Error in client execution: ${err.message}`);
     } finally {
-        console.log("\n[Client] Shutting down MCP Server background process...");
+        logInfo("Shutting down MCP Server background process...");
         serverProcess.kill();
         process.exit(0);
     }
