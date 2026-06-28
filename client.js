@@ -669,31 +669,62 @@ async function main() {
         logInfo(`Discovered ${mcpTools.length} tools from server: ${mcpTools.map(t => t.name).join(', ')}`);
         
         // Provider routing
-        let provider = process.env.AI_PROVIDER || "";
-        const geminiKey = process.env.GEMINI_API_KEY;
-        const openAIKey = process.env.OPENAI_API_KEY;
-        const anthropicKey = process.env.ANTHROPIC_API_KEY;
-        const groqKey = process.env.GROQ_API_KEY;
-        const githubToken = process.env.GITHUB_TOKEN;
-        const localBase = process.env.LOCAL_API_BASE;
+        let provider = (process.env.AI_PROVIDER || "").toLowerCase().trim();
         
-        // Auto-detect provider if not explicitly configured
+        // Key definitions
+        const keys = {
+            gemini: process.env.GEMINI_API_KEY,
+            openai: process.env.OPENAI_API_KEY,
+            anthropic: process.env.ANTHROPIC_API_KEY,
+            groq: process.env.GROQ_API_KEY,
+            github: process.env.GITHUB_TOKEN,
+            deepseek: process.env.DEEPSEEK_API_KEY,
+            mistral: process.env.MISTRAL_API_KEY,
+            cohere: process.env.COHERE_API_KEY,
+            together: process.env.TOGETHER_API_KEY,
+            openrouter: process.env.OPENROUTER_API_KEY,
+            fireworks: process.env.FIREWORKS_API_KEY,
+            togetherai: process.env.TOGETHER_API_KEY,
+            cerebras: process.env.CEREBRAS_API_KEY,
+            nebius: process.env.NEBIUS_API_KEY,
+            deepinfra: process.env.DEEPINFRA_API_KEY,
+            siliconflow: process.env.SILICONFLOW_API_KEY,
+            sambanova: process.env.SAMBANNOVA_API_KEY || process.env.SAMBANNOVA_CLOUD_API_KEY,
+            lepton: process.env.LEPTON_API_KEY,
+            baseten: process.env.BASETEN_API_KEY,
+            modal: process.env.MODAL_API_KEY,
+            replicate: process.env.REPLICATE_API_KEY,
+            anyscale: process.env.ANYSCALE_API_KEY,
+            octoai: process.env.OCTOAI_API_KEY,
+            novita: process.env.NOVITA_API_KEY,
+            runpod: process.env.RUNPOD_API_KEY,
+            lambda: process.env.LAMBDA_API_KEY,
+            scaleway: process.env.SCALEWAY_API_KEY,
+            cloudflare: process.env.CLOUDFLARE_API_KEY,
+            watsonx: process.env.WATSONX_API_KEY,
+            nvidia: process.env.NVIDIA_API_KEY || process.env.NVIDIA_NIM_API_KEY,
+            upstage: process.env.UPSTAGE_API_KEY,
+            reka: process.env.REKA_API_KEY,
+            perplexity: process.env.PERPLEXITY_API_KEY,
+            moonshot: process.env.MOONSHOT_API_KEY,
+            abacus: process.env.ABACUS_API_KEY,
+            predibase: process.env.PREDIBASE_API_KEY
+        };
+        
+        // Auto-detect provider if none is specified in env
         if (!provider) {
-            if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
-                provider = 'gemini';
-            } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
-                provider = 'openai';
-            } else if (anthropicKey && anthropicKey !== 'your_anthropic_api_key_here') {
-                provider = 'anthropic';
-            } else if (groqKey && groqKey !== 'your_groq_api_key_here') {
-                provider = 'groq';
-            } else if (githubToken && githubToken !== 'your_github_token_here') {
-                provider = 'github';
-            } else if (localBase) {
-                provider = 'local';
-            } else {
-                provider = 'mock';
-            }
+            if (keys.gemini && keys.gemini !== 'your_gemini_api_key_here') provider = 'gemini';
+            else if (keys.openai && keys.openai !== 'your_openai_api_key_here') provider = 'openai';
+            else if (keys.anthropic && keys.anthropic !== 'your_anthropic_api_key_here') provider = 'anthropic';
+            else if (keys.groq && keys.groq !== 'your_groq_api_key_here') provider = 'groq';
+            else if (keys.github && keys.github !== 'your_github_token_here') provider = 'github';
+            else if (keys.deepseek) provider = 'deepseek';
+            else if (keys.mistral) provider = 'mistral';
+            else if (keys.openrouter) provider = 'openrouter';
+            else if (keys.together) provider = 'together';
+            else if (keys.perplexity) provider = 'perplexity';
+            else if (process.env.LOCAL_API_BASE) provider = 'local';
+            else provider = 'mock';
         }
         
         logInfo(`Active AI Provider: ${COLORS.bright}${provider.toUpperCase()}${COLORS.reset}`);
@@ -701,22 +732,141 @@ async function main() {
         async function runRequest(q) {
             try {
                 if (provider === 'gemini') {
-                    await runGemini(geminiKey, q, mcpTools);
-                } else if (provider === 'openai') {
-                    await runOpenAI(openAIKey, q, mcpTools, undefined, process.env.OPENAI_MODEL || "gpt-4o-mini");
+                    await runGemini(keys.gemini, q, mcpTools);
                 } else if (provider === 'anthropic') {
-                    await runAnthropic(anthropicKey, q, mcpTools);
-                } else if (provider === 'groq') {
-                    const groqModel = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
-                    await runOpenAI(groqKey, q, mcpTools, "https://api.groq.com/openai/v1", groqModel);
-                } else if (provider === 'github') {
-                    const githubModel = process.env.GITHUB_MODEL || "gpt-4o";
-                    await runOpenAI(githubToken, q, mcpTools, "https://models.inference.ai.azure.com", githubModel);
-                } else if (provider === 'local') {
-                    const localModel = process.env.LOCAL_MODEL || "llama3";
-                    await runOpenAI('local-key', q, mcpTools, localBase, localModel);
-                } else {
+                    await runAnthropic(keys.anthropic, q, mcpTools);
+                } else if (provider === 'mock') {
                     await runMockAI(q, mcpTools);
+                } else {
+                    // Generic OpenAI-Compatible routing mapping for all requested providers
+                    let apiBase = undefined;
+                    let apiKey = keys[provider] || process.env.OPENAI_API_KEY || "local-key";
+                    let modelName = process.env.AI_MODEL;
+                    
+                    switch (provider) {
+                        case 'openai':
+                            modelName = modelName || process.env.OPENAI_MODEL || "gpt-4o-mini";
+                            break;
+                        case 'groq':
+                            apiBase = "https://api.groq.com/openai/v1";
+                            modelName = modelName || process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+                            break;
+                        case 'github':
+                            apiBase = "https://models.inference.ai.azure.com";
+                            apiKey = keys.github;
+                            modelName = modelName || process.env.GITHUB_MODEL || "gpt-4o";
+                            break;
+                        case 'deepseek':
+                            apiBase = "https://api.deepseek.com";
+                            modelName = modelName || "deepseek-chat";
+                            break;
+                        case 'mistral':
+                            apiBase = "https://api.mistral.ai/v1";
+                            modelName = modelName || "mistral-large-latest";
+                            break;
+                        case 'perplexity':
+                            apiBase = "https://api.perplexity.ai";
+                            modelName = modelName || "sonar-reasoning";
+                            break;
+                        case 'together':
+                        case 'togetherai':
+                            apiBase = "https://api.together.xyz/v1";
+                            modelName = modelName || "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+                            break;
+                        case 'openrouter':
+                            apiBase = "https://openrouter.ai/api/v1";
+                            modelName = modelName || "google/gemini-2.5-flash";
+                            break;
+                        case 'fireworks':
+                        case 'fireworksai':
+                            apiBase = "https://api.fireworks.ai/inference/v1";
+                            modelName = modelName || "accounts/fireworks/models/llama-v3p3-70b-instruct";
+                            break;
+                        case 'nebius':
+                        case 'nebiusai':
+                            apiBase = "https://api.studio.nebius.ai/v1";
+                            modelName = modelName || "meta-llama/Meta-Llama-3.1-70B-Instruct";
+                            break;
+                        case 'deepinfra':
+                            apiBase = "https://api.deepinfra.com/v1/openai";
+                            modelName = modelName || "meta-llama/Llama-3.3-70B-Instruct";
+                            break;
+                        case 'siliconflow':
+                            apiBase = "https://api.siliconflow.cn/v1";
+                            modelName = modelName || "deepseek-ai/DeepSeek-V3";
+                            break;
+                        case 'sambanova':
+                        case 'sambanovaai':
+                            apiBase = "https://api.sambanova.ai/v1";
+                            modelName = modelName || "Meta-Llama-3.1-70B-Instruct";
+                            break;
+                        case 'lepton':
+                            apiBase = "https://api.lepton.ai/v1";
+                            modelName = modelName || "llama3-1-70b";
+                            break;
+                        case 'baseten':
+                            apiBase = "https://bridge.baseten.co/v1";
+                            modelName = modelName || "meta-llama-3-1-70b-instruct";
+                            break;
+                        case 'modal':
+                            apiBase = process.env.MODAL_API_BASE;
+                            modelName = modelName || "llama-3-1-70b-instruct";
+                            break;
+                        case 'anyscale':
+                            apiBase = "https://api.endpoints.anyscale.com/v1";
+                            modelName = modelName || "meta-llama/Meta-Llama-3-70B-Instruct";
+                            break;
+                        case 'octoai':
+                            apiBase = "https://text.octoai.run/v1";
+                            modelName = modelName || "meta-llama-3-70b-instruct";
+                            break;
+                        case 'runpod':
+                            apiBase = `https://api.runpod.ai/v2/${process.env.RUNPOD_POD_ID}/openai/v1`;
+                            modelName = modelName || "llama-3-70b-instruct";
+                            break;
+                        case 'lambda':
+                            apiBase = "https://api.lambdalabs.com/v1";
+                            modelName = modelName || "llama3-70b-instruct";
+                            break;
+                        case 'scaleway':
+                            apiBase = "https://api.scaleway.ai/v1";
+                            modelName = modelName || "llama-3-1-70b-instruct";
+                            break;
+                        case 'cloudflare':
+                            const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+                            apiBase = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`;
+                            modelName = modelName || "@cf/meta/llama-3.1-70b-instruct";
+                            break;
+                        case 'watsonx':
+                            apiBase = "https://us-south.ml.cloud.ibm.com/ml/v1/text/generation?version=2023-05-29";
+                            modelName = modelName || "ibm/granite-13b-chat-v2";
+                            break;
+                        case 'nvidia':
+                        case 'nvidianim':
+                            apiBase = "https://integrate.api.nvidia.com/v1";
+                            modelName = modelName || "meta/llama3-70b-instruct";
+                            break;
+                        case 'upstage':
+                            apiBase = "https://api.upstage.ai/v1/solar";
+                            modelName = modelName || "solar-1-mini-chat";
+                            break;
+                        case 'moonshot':
+                        case 'moonshotai':
+                            apiBase = "https://api.moonshot.cn/v1";
+                            modelName = modelName || "moonshot-v1-8k";
+                            break;
+                        case 'local':
+                            apiBase = process.env.LOCAL_API_BASE || "http://localhost:11434/v1";
+                            modelName = modelName || process.env.LOCAL_MODEL || "llama3.2:1b";
+                            break;
+                        default:
+                            // Fallback custom providers configuration (e.g. LiteLLM, Vercel AI Gateway, Portkey, Azure, AWS Bedrock, Google Vertex, Ernie, Hunyuan, Volcano)
+                            apiBase = process.env.CUSTOM_API_BASE || "http://localhost:11434/v1";
+                            modelName = modelName || process.env.CUSTOM_MODEL || "llama3";
+                            break;
+                    }
+                    
+                    await runOpenAI(apiKey, q, mcpTools, apiBase, modelName);
                 }
             } catch (err) {
                 logError(`Failed to process AI execution: ${err.message}`);

@@ -97,7 +97,7 @@ graph TD
 Create a file named `.env` in the root folder (automatically ignored by git) and set your preferred AI provider:
 
 ```env
-# Choose AI Provider: gemini, openai, anthropic, groq, github, local, mock
+# Choose AI Provider: gemini, openai, anthropic, groq, github, deepseek, mistral, together, openrouter, watsonx, perplexity, nvidia, local, mock, etc.
 AI_PROVIDER=gemini
 
 # Google Gemini API
@@ -119,6 +119,11 @@ GROQ_MODEL=llama-3.3-70b-versatile
 # GitHub Models API
 GITHUB_TOKEN=ghp_...
 GITHUB_MODEL=gpt-4o
+
+# Other supported providers (DeepSeek, Mistral, Together, OpenRouter, Watsonx, Perplexity, Cloudflare, Nebius, NVIDIA NIM, Upstage, Moonshot, etc.)
+DEEPSEEK_API_KEY=sk-...
+MISTRAL_API_KEY=sk-...
+PERPLEXITY_API_KEY=pplx-...
 
 # Local AI / Ollama / LM Studio (OpenAI-compatible)
 LOCAL_API_BASE=http://localhost:11434/v1
