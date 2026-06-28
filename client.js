@@ -203,6 +203,45 @@ function sanitizeJsonString(text) {
     return slice.trim();
 }
 
+// Lightweight tool pruning to prevent tiny local models from getting overwhelmed by 19 tools
+function pruneToolsForLocalModel(query, mcpTools) {
+    const lowerQuery = query.toLowerCase();
+    
+    // 1. Audio controls keywords
+    if (lowerQuery.includes('lautstärke') || lowerQuery.includes('volume') || lowerQuery.includes('leiser') || lowerQuery.includes('lauter') || lowerQuery.includes('mute') || lowerQuery.includes('stumm')) {
+        return mcpTools.filter(t => t.name === 'set_volume' || t.name === 'get_volume' || t.name === 'set_mute');
+    }
+    
+    // 2. CPU / System status keywords
+    if (lowerQuery.includes('auslastung') || lowerQuery.includes('busy') || lowerQuery.includes('cpu') || lowerQuery.includes('ram') || lowerQuery.includes('system') || lowerQuery.includes('pc') || lowerQuery.includes('status')) {
+        return mcpTools.filter(t => t.name === 'get_system_status' || t.name === 'get_top_processes');
+    }
+    
+    // 3. Media playback keywords
+    if (lowerQuery.includes('musik') || lowerQuery.includes('play') || lowerQuery.includes('pause') || lowerQuery.includes('next') || lowerQuery.includes('skip') || lowerQuery.includes('prev') || lowerQuery.includes('weiter') || lowerQuery.includes('zurück')) {
+        return mcpTools.filter(t => t.name === 'media_control');
+    }
+    
+    // 4. Clipboard operations
+    if (lowerQuery.includes('clipboard') || lowerQuery.includes('zwischenablage') || lowerQuery.includes('copy') || lowerQuery.includes('paste') || lowerQuery.includes('kopier')) {
+        return mcpTools.filter(t => t.name === 'get_clipboard' || t.name === 'set_clipboard');
+    }
+    
+    // 5. Open URL / Application launcher
+    if (lowerQuery.includes('open') || lowerQuery.includes('launch') || lowerQuery.includes('öffne') || lowerQuery.includes('start')) {
+        return mcpTools.filter(t => t.name === 'open_url' || t.name === 'launch_app');
+    }
+    
+    // 6. Network status
+    if (lowerQuery.includes('network') || lowerQuery.includes('netzwerk') || lowerQuery.includes('ip') || lowerQuery.includes('wifi') || lowerQuery.includes('wlan')) {
+        return mcpTools.filter(t => t.name === 'get_network_info');
+    }
+    
+    // Fallback core tools list (max 3-4 tools)
+    const fallbackTools = ['get_system_status', 'get_volume', 'get_top_processes', 'open_url'];
+    return mcpTools.filter(t => fallbackTools.includes(t.name));
+}
+
 async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName = "gpt-4o-mini") {
     const config = { apiKey };
     if (baseURL) {
@@ -210,7 +249,13 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
     }
     const openai = new OpenAI(config);
     
-    const tools = mcpTools.map(tool => ({
+    // Apply dynamic tool pruning for local AI models
+    const finalTools = baseURL ? pruneToolsForLocalModel(query, mcpTools) : mcpTools;
+    if (baseURL) {
+        logInfo(`[Pruning] Reduced tool selection to ${finalTools.length} tools: ${finalTools.map(t => t.name).join(', ')}`);
+    }
+
+    const tools = finalTools.map(tool => ({
         type: "function",
         function: {
             name: tool.name,
@@ -222,7 +267,7 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
     const messages = [];
     if (baseURL) {
         // Prepend custom system prompt with one-shot example for local TinyLLMs
-        const availableToolNames = mcpTools.map(t => t.name).join(", ");
+        const availableToolNames = finalTools.map(t => t.name).join(", ");
         const systemPrompt = `Du bist ein Windows-PC-Systemassistent.
 Verfügbare Tools: ${availableToolNames}
 Wenn der Nutzer die Lautstärke ändern will, antworte AUSSCHLIESSLICH mit: {"name": "set_volume", "arguments": {"level": 50}}
