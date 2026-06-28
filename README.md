@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (16 total)](#-available-tools-16-total)
+7. [Available Tools (19 total)](#-available-tools-19-total)
 
 ---
 
@@ -22,12 +22,15 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 * **get_top_processes**: Top 5 CPU-intensive running processes with PIDs and CPU percentages.
 * **get_battery_status**: Battery health percentage, charging state, and estimated remaining minutes (laptops).
 * **get_network_info**: Retrieves local IPv4 addresses, active network adapters, Wi-Fi SSID, and external IP.
+* **get_gpu_info**: GPU graphics card details, driver versions, and VRAM memory.
+* **get_audio_devices**: Lists available system output and input audio hardware controllers.
 
 ### 🎛 PC & Media Control
 * **media_control**: Simulates keyboard media keys (Play/Pause, Next Track, Previous Track, Stop).
 * **get_volume / set_volume / set_mute**: Checks system volume level, sets level (0-100), and mutes/unmutes audio.
 * **get_brightness / set_brightness**: Reads or changes monitor brightness (0-100%).
 * **system_power_control**: Locks the screen, puts the PC to sleep, schedules a shutdown/restart (with a 60s warning), or aborts active power schedules.
+* **close_process**: Force terminates a running background/foreground process by name or process ID.
 
 ### 📋 Automation & Clipboard Utilities
 * **get_clipboard**: Reads text contents currently on the Windows clipboard.
@@ -158,3 +161,6 @@ npm start "Check the battery status"
 | `launch_app` | `app` (string) | Launches the application (e.g. `notepad`). |
 | `get_network_info` | None | Returns local IPs, network adapter name, external IP, and SSID. |
 | `show_desktop` | None | Minimizes all active windows to show the desktop. |
+| `get_gpu_info` | None | Returns GPU name, driver version, memory, and status. |
+| `get_audio_devices`| None | Lists all active audio output and input devices. |
+| `close_process` | `target` (string) | Force closes process by name or PID. |

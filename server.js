@@ -225,6 +225,36 @@ const toolsList = [
             type: "object",
             properties: {}
         }
+    },
+    {
+        name: "get_gpu_info",
+        description: "Get graphics card (GPU) details, driver version, memory, and status.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_audio_devices",
+        description: "List available system audio output and input hardware devices.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "close_process",
+        description: "Force close a running Windows process by name or PID (e.g. 'notepad' or '1244').",
+        inputSchema: {
+            type: "object",
+            properties: {
+                target: {
+                    type: "string",
+                    description: "The name of the process (e.g. 'notepad') or the PID number to kill."
+                }
+            },
+            required: ["target"]
+        }
     }
 ];
 
@@ -754,6 +784,100 @@ ${text.replace(/'/g, "''")}
                 throw new Error(`Failed to minimize windows: ${data.error}`);
             }
             return "All active windows minimized to show desktop.";
+        }
+        
+        case "get_gpu_info": {
+            const script = `
+                try {
+                    $gpus = Get-CimInstance Win32_VideoController
+                    $list = @()
+                    foreach ($g in $gpus) {
+                        $list += @{
+                            name = $g.Name
+                            driverVersion = $g.DriverVersion
+                            ramGB = if ($g.AdapterRAM) { [Math]::Round($g.AdapterRAM / 1GB, 2) } else { $null }
+                            status = $g.Status
+                        }
+                    }
+                    $result = @{ success = $true; list = $list }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to read GPU info: ${data.error}`);
+            }
+            if (!data.list || data.list.length === 0) {
+                return "No GPU controllers detected.";
+            }
+            let text = "GPU Information:\\n";
+            data.list.forEach((gpu, idx) => {
+                const ram = gpu.ramGB !== null ? ", VRAM: " + gpu.ramGB + " GB" : "";
+                text += (idx + 1) + ". GPU: " + gpu.name + " (Driver: " + gpu.driverVersion + ram + ", Status: " + gpu.status + ")\\n";
+            });
+            return text.trim();
+        }
+        
+        case "get_audio_devices": {
+            const script = `
+                try {
+                    $devices = Get-CimInstance Win32_SoundDevice
+                    $list = @()
+                    foreach ($d in $devices) {
+                        $list += @{
+                            name = $d.Name
+                            status = $d.Status
+                            manufacturer = $d.Manufacturer
+                        }
+                    }
+                    $result = @{ success = $true; list = $list }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to read audio devices: ${data.error}`);
+            }
+            if (!data.list || data.list.length === 0) {
+                return "No audio sound devices detected.";
+            }
+            let text = "Audio Devices:\\n";
+            data.list.forEach((dev, idx) => {
+                text += (idx + 1) + ". Name: " + dev.name + " (Manufacturer: " + (dev.manufacturer || "Unknown") + ", Status: " + dev.status + ")\\n";
+            });
+            return text.trim();
+        }
+        
+        case "close_process": {
+            const target = args.target;
+            if (!target) {
+                throw new Error("Missing 'target' parameter specifying process name or PID.");
+            }
+            const script = `
+                try {
+                    if ("${target}" -match '^\\d+$') {
+                        Stop-Process -Id [int]"${target}" -Force -ErrorAction Stop
+                    } else {
+                        Stop-Process -Name "${target}" -Force -ErrorAction Stop
+                    }
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to close process: ${data.error}`);
+            }
+            return "Successfully closed process matching: " + target;
         }
         
         default:

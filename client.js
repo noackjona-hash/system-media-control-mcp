@@ -188,6 +188,44 @@ async function runGemini(apiKey, query, mcpTools) {
     console.log(`\n${COLORS.green}${COLORS.bright}Gemini Final Response:${COLORS.reset}\n=================================\n${response.text()}\n=================================`);
 }
 
+// Bracket-matching tokenizer to extract JSON block from text
+function extractJsonBlock(text) {
+    const startIndex = text.indexOf('{');
+    if (startIndex === -1) return null;
+    
+    let braceCount = 0;
+    let inString = false;
+    let escape = false;
+    
+    for (let i = startIndex; i < text.length; i++) {
+        const char = text[i];
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (char === '\\') {
+            escape = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (!inString) {
+            if (char === '{') {
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+                if (braceCount === 0) {
+                    return text.substring(startIndex, i + 1);
+                }
+            }
+        }
+    }
+    // If braces are unbalanced (e.g. truncated JSON), return the rest of the string
+    return text.substring(startIndex);
+}
+
 async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName = "gpt-4o-mini") {
     const config = { apiKey };
     if (baseURL) {
@@ -206,9 +244,11 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
 
     const messages = [{ role: "user", content: query }];
     let running = true;
+    let rePromptAttempts = 0;
+    const maxAttempts = 2;
     
     while (running) {
-        logStep(`Sending request to AI...`);
+        logStep(`Sending request to AI (${modelName})...`);
         const response = await openai.chat.completions.create({
             model: modelName,
             messages,
@@ -217,14 +257,18 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
 
         const choice = response.choices[0];
         const message = choice.message;
+        
+        // Push the assistant's message to the conversation history
         messages.push(message);
 
+        // Stage 1: Validate native tool calls API block
         if (message.tool_calls && message.tool_calls.length > 0) {
+            rePromptAttempts = 0; // reset attempts on successful execution path
             for (const toolCall of message.tool_calls) {
                 const name = toolCall.function.name;
                 const args = JSON.parse(toolCall.function.arguments);
                 
-                logTool(`AI requested: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                logTool(`AI requested native: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
                 try {
                     const toolOutput = await callMcpTool(name, args);
                     logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
@@ -246,8 +290,83 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
                 }
             }
         } else {
-            console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response:${COLORS.reset}\n=================================\n${message.content}\n=================================`);
-            running = false;
+            // Stage 2: Scan message.content for JSON-like blocks if native tool calls is empty
+            const content = message.content || "";
+            const hasJsonIndicator = content.includes('{') && (content.includes('"name":') || content.includes('"name" :'));
+            
+            // Check if it mentions any registered tool name to be extra precise
+            const mentionsTool = mcpTools.some(tool => content.includes(tool.name));
+            
+            if (hasJsonIndicator || (content.includes('{') && mentionsTool)) {
+                const jsonStr = extractJsonBlock(content);
+                let toolCallObj = null;
+                let parseError = null;
+                
+                if (jsonStr) {
+                    try {
+                        toolCallObj = JSON.parse(jsonStr);
+                        // Validate format
+                        if (!toolCallObj.name) {
+                            parseError = new Error("JSON tool call missing 'name' field.");
+                        } else {
+                            const isValidTool = mcpTools.some(t => t.name === toolCallObj.name);
+                            if (!isValidTool) {
+                                parseError = new Error(`Tool name '${toolCallObj.name}' is not registered on this server.`);
+                            }
+                        }
+                    } catch (err) {
+                        parseError = err;
+                    }
+                } else {
+                    parseError = new Error("Brace tokenizer could not isolate a JSON block.");
+                }
+                
+                if (toolCallObj && !parseError) {
+                    // Valid tool call parsed manually from content text!
+                    rePromptAttempts = 0; // reset
+                    const name = toolCallObj.name;
+                    const args = toolCallObj.arguments || toolCallObj.args || {};
+                    
+                    logTool(`AI requested text-JSON: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                    try {
+                        const toolOutput = await callMcpTool(name, args);
+                        logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
+                        
+                        // Feed back to TinyLLM model
+                        messages.push({
+                            role: "user",
+                            content: `System Response (Tool ${name} executed successfully): ${toolOutput}`
+                        });
+                    } catch (err) {
+                        logError(`MCP execution failed: ${err.message}`);
+                        messages.push({
+                            role: "user",
+                            content: `System Response (Tool ${name} execution failed): ${err.message}`
+                        });
+                    }
+                } else {
+                    // Invalid/Malformed JSON or missing tool name validation
+                    if (rePromptAttempts < maxAttempts) {
+                        rePromptAttempts++;
+                        logError(`JSON parsing/validation failed: ${parseError.message}`);
+                        logStep(`${COLORS.yellow}${COLORS.bright}Malformed tool call from local model. Triggering self-correction prompt (Try ${rePromptAttempts}/${maxAttempts})...${COLORS.reset}`);
+                        
+                        // Push correction instructions
+                        messages.push({
+                            role: "user",
+                            content: `System Instruction: The JSON tool call you just outputted was malformed, incomplete, or invalid. Error details: ${parseError.message}. Please correct the JSON syntax, close all brackets, and output the tool call again in this exact JSON format: {"name": "tool_name", "arguments": {...}}. Do not output anything other than the raw JSON block.`
+                        });
+                    } else {
+                        logError(`Exceeded maximum correction attempts (${maxAttempts}). Treating response as final text.`);
+                        console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response:${COLORS.reset}\n=================================\n${content}\n=================================`);
+                        running = false;
+                    }
+                }
+            } else {
+                // Regular conversational response
+                console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response:${COLORS.reset}\n=================================\n${content}\n=================================`);
+                running = false;
+            }
         }
     }
 }
@@ -409,6 +528,14 @@ async function runMockAI(query, mcpTools) {
         toolName = 'get_network_info';
     } else if (lowerQuery.includes('desktop') || lowerQuery.includes('minimize all') || lowerQuery.includes('show desktop')) {
         toolName = 'show_desktop';
+    } else if (lowerQuery.includes('gpu') || lowerQuery.includes('graphics') || lowerQuery.includes('grafikkarte')) {
+        toolName = 'get_gpu_info';
+    } else if (lowerQuery.includes('audio device') || lowerQuery.includes('sound device') || lowerQuery.includes('audiogeräte') || lowerQuery.includes('soundkarte')) {
+        toolName = 'get_audio_devices';
+    } else if (lowerQuery.includes('kill') || lowerQuery.includes('close process') || lowerQuery.includes('terminate') || lowerQuery.includes('prozess beenden')) {
+        const match = query.match(/(?:kill|close process|terminate)\s+([a-z0-9._-]+)/i) || query.match(/(?:beenden)\s+([a-z0-9._-]+)/i);
+        toolName = 'close_process';
+        toolArgs = { target: match ? match[1].trim() : "" };
     } else if (lowerQuery.includes('status') || lowerQuery.includes('system') || lowerQuery.includes('pc') || lowerQuery.includes('usage')) {
         toolName = 'get_system_status';
     }
