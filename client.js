@@ -230,8 +230,11 @@ function pruneToolsForLocalModel(query, mcpTools) {
         return mcpTools.filter(t => t.name === 'get_clipboard' || t.name === 'set_clipboard');
     }
     
-    // 5. Open URL / Application launcher
-    if (lowerQuery.includes('open') || lowerQuery.includes('launch') || lowerQuery.includes('öffne') || lowerQuery.includes('start')) {
+    // 5. Open URL / Application launcher / Active window focus
+    if (lowerQuery.includes('open') || lowerQuery.includes('launch') || lowerQuery.includes('öffne') || lowerQuery.includes('start') || lowerQuery.includes('active') || lowerQuery.includes('focus') || lowerQuery.includes('fokus') || lowerQuery.includes('fenster') || lowerQuery.includes('foreground')) {
+        if (lowerQuery.includes('active') || lowerQuery.includes('focus') || lowerQuery.includes('fokus') || lowerQuery.includes('fenster') || lowerQuery.includes('foreground') || lowerQuery.includes('vordergrund')) {
+            return mcpTools.filter(t => t.name === 'get_active_window');
+        }
         return mcpTools.filter(t => t.name === 'open_url' || t.name === 'launch_app');
     }
     
@@ -304,15 +307,22 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
     }));
 
     const messages = [];
+    const availableToolNames = finalTools.map(t => t.name).join(", ");
+    let systemPrompt = "";
     if (baseURL) {
         // Prepend custom system prompt with one-shot example for local TinyLLMs
-        const availableToolNames = finalTools.map(t => t.name).join(", ");
-        const systemPrompt = `Du bist ein Windows-PC-Systemassistent.
+        systemPrompt = `Du bist ein Windows-PC-Systemassistent.
 Verfügbare Tools: ${availableToolNames}
 Wenn der Nutzer die Lautstärke ändern will, antworte AUSSCHLIESSLICH mit: {"name": "set_volume", "arguments": {"level": 50}}
 Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
-        messages.push({ role: "system", content: systemPrompt });
+    } else {
+        // Cloud agent prompt supporting chaining
+        systemPrompt = `You are a helpful PC Windows agent assistant.
+You can execute tools to interact with the system.
+If the task requires multiple steps (e.g. checking status before modifying), call the tools sequentially in a chain.
+Once you have retrieved all necessary information or successfully performed the action, summarize the outcome briefly and politely to the user. Do not ask follow-up questions.`;
     }
+    messages.push({ role: "system", content: systemPrompt });
     messages.push({ role: "user", content: query });
 
     let running = true;
@@ -390,11 +400,13 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
                     });
                 }
             }
-            // Inject strict final system reminder to avoid model confusion/irrelevant questions
-            messages.push({
-                role: "user",
-                content: "Die Tools wurden erfolgreich ausgeführt. Informiere den Nutzer kurz und sachlich, dass die Aktion erledigt ist. Stelle keine Gegenfragen!"
-            });
+            if (baseURL) {
+                // Inject strict final system reminder to avoid model confusion/irrelevant questions (local models only)
+                messages.push({
+                    role: "user",
+                    content: "Die Tools wurden erfolgreich ausgeführt. Informiere den Nutzer kurz und sachlich, dass die Aktion erledigt ist. Stelle keine Gegenfragen!"
+                });
+            }
         } else {
             // Stage 2: Scan message.content for JSON-like blocks if native tool calls is empty
             const content = message.content || "";

@@ -337,6 +337,14 @@ const toolsList = [
             type: "object",
             properties: {}
         }
+    },
+    {
+        name: "get_active_window",
+        description: "Retrieve the title, process name, and PID of the currently focused foreground window on Windows.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
     }
 ];
 
@@ -1228,6 +1236,51 @@ ${text.replace(/'/g, "''")}
                 text += `- Interface "${dns.interfaceAlias}" (Index: ${dns.interfaceIndex}): DNS = [${addrs}]\n`;
             });
             return text.trim();
+        }
+        
+        case "get_active_window": {
+            const script = `
+                try {
+                    $code = @"
+                    using System;
+                    using System.Runtime.InteropServices;
+                    using System.Text;
+                    public class Win {
+                        [DllImport("user32.dll")]
+                        public static extern IntPtr GetForegroundWindow();
+                        [DllImport("user32.dll")]
+                        public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+                        [DllImport("user32.dll")]
+                        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+                    }
+"@
+                    Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+                    $hwnd = [Win]::GetForegroundWindow()
+                    $title = New-Object System.Text.StringBuilder 256
+                    [Win]::GetWindowText($hwnd, $title, 256) | Out-Null
+                    $procId = 0
+                    [Win]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+                    $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
+                    $result = @{
+                        success = $true
+                        title = $title.ToString()
+                        processName = if ($process) { $process.ProcessName } else { "Unknown" }
+                        pid = $procId
+                    }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to retrieve active window: ${data.error}`);
+            }
+            if (!data.title && data.processName === "Unknown") {
+                return "No active foreground window detected (desktop or system focus).";
+            }
+            return `Active Window Details:\n- Title: "${data.title || "No Title"}"\n- Process Name: "${data.processName}" (PID: ${data.pid})`;
         }
         
         default:

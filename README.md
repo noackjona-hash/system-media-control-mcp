@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (28 total)](#-available-tools-28-total)
+7. [Available Tools (29 total)](#-available-tools-29-total)
 
 ---
 
@@ -28,6 +28,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 * **get_network_latency**: Test latency (ping response time) to major targets (e.g. google.com).
 * **get_wifi_networks**: Scans and lists nearby Wi-Fi network SSIDs and signal strengths.
 * **get_wifi_status**: Retrieves status details of the currently active Wi-Fi connection (SSID, Signal quality, Transmission rate).
+* **get_active_window**: Retrieves the title, process name, and PID of the currently active focused foreground window.
 * **get_gpu_info**: GPU graphics card details, driver versions, and VRAM memory.
 * **get_audio_devices**: Lists available system output and input audio hardware controllers.
 
@@ -195,3 +196,4 @@ npm start "Check the battery status"
 | `get_network_latency`| `target` (string) | Tests latency (ping response time) to custom or default addresses. |
 | `clear_clipboard`  | None | Clears all text contents currently on the Windows clipboard. |
 | `get_dns_servers`  | None | Retrieves configured DNS server IP addresses for the network interface. |
+| `get_active_window`| None | Retrieves the title, process name, and PID of the focused foreground window. |
