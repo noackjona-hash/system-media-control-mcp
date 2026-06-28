@@ -237,8 +237,11 @@ function pruneToolsForLocalModel(query, mcpTools) {
         return mcpTools.filter(t => t.name === 'get_network_info');
     }
     
-    // 7. Wi-Fi scanning
+    // 7. Wi-Fi scanning & status
     if (lowerQuery.includes('wifi') || lowerQuery.includes('wlan') || lowerQuery.includes('ssid')) {
+        if (lowerQuery.includes('status') || lowerQuery.includes('qualität') || lowerQuery.includes('speed') || lowerQuery.includes('verbindung')) {
+            return mcpTools.filter(t => t.name === 'get_wifi_status');
+        }
         return mcpTools.filter(t => t.name === 'get_wifi_networks');
     }
     
@@ -255,6 +258,16 @@ function pruneToolsForLocalModel(query, mcpTools) {
     // 10. Recycle bin clearing
     if (lowerQuery.includes('recycle') || lowerQuery.includes('bin') || lowerQuery.includes('papierkorb') || lowerQuery.includes('leeren')) {
         return mcpTools.filter(t => t.name === 'empty_recycle_bin');
+    }
+
+    // 11. Hardware specifications
+    if (lowerQuery.includes('hardware') || lowerQuery.includes('spezifikation') || lowerQuery.includes('modell') || lowerQuery.includes('mainboard') || lowerQuery.includes('bios') || lowerQuery.includes('specs') || lowerQuery.includes('motherboard')) {
+        return mcpTools.filter(t => t.name === 'get_system_info');
+    }
+
+    // 12. Network latency / Pings
+    if (lowerQuery.includes('ping') || lowerQuery.includes('latency') || lowerQuery.includes('latenz') || lowerQuery.includes('geschwindigkeit') || lowerQuery.includes('speedtest')) {
+        return mcpTools.filter(t => t.name === 'get_network_latency');
     }
     
     // Fallback core tools list (max 3-4 tools)

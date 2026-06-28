@@ -292,6 +292,35 @@ const toolsList = [
             type: "object",
             properties: {}
         }
+    },
+    {
+        name: "get_system_info",
+        description: "Retrieve detailed static system hardware specifications (CPU model, motherboard, total physical RAM specs, OS version, and BIOS).",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_wifi_status",
+        description: "Retrieve status details of the currently active Wi-Fi adapter connection (SSID, BSSID, Signal quality, Transmission rates).",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_network_latency",
+        description: "Test network latency (ping response time and packet loss) to major targets (e.g. google.com).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                target: {
+                    type: "string",
+                    description: "Optional custom address to ping. Defaults to '8.8.8.8'."
+                }
+            }
+        }
     }
 ];
 
@@ -1040,6 +1069,96 @@ ${text.replace(/'/g, "''")}
                 text += (idx + 1) + ". SSID: \"" + w.ssid + "\" (Signal: " + w.signal + "%)\n";
             });
             return text.trim();
+        }
+        
+        case "get_system_info": {
+            const script = `
+                $os = Get-CimInstance Win32_OperatingSystem
+                $cpu = Get-CimInstance Win32_Processor
+                $bios = Get-CimInstance Win32_Bios
+                $motherboard = Get-CimInstance Win32_BaseBoard
+                $ram = Get-CimInstance Win32_PhysicalMemory
+                
+                $ramTotalBytes = 0
+                $ramDetails = @()
+                foreach ($mem in $ram) {
+                    $ramTotalBytes += $mem.Capacity
+                    $ramDetails += @{
+                        speedMHz = $mem.Speed
+                        capacityGB = [Math]::Round($mem.Capacity / 1GB, 1)
+                        manufacturer = $mem.Manufacturer
+                    }
+                }
+                
+                $result = @{
+                    osName = $os.Caption
+                    osVersion = $os.Version
+                    osArchitecture = $os.OSArchitecture
+                    cpuName = $cpu.Name
+                    cpuCores = $cpu.NumberOfCores
+                    cpuLogical = $cpu.NumberOfLogicalProcessors
+                    biosVersion = $bios.SMBIOSBIOSVersion
+                    motherboardManufacturer = $motherboard.Manufacturer
+                    motherboardProduct = $motherboard.Product
+                    ramTotalGB = [Math]::Round($ramTotalBytes / 1GB, 1)
+                    ramModules = $ramDetails
+                }
+                $result | ConvertTo-Json
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            let text = `System Hardware Info:\n`;
+            text += `- Operating System: ${data.osName} (${data.osArchitecture}, Version: ${data.osVersion})\n`;
+            text += `- Processor: ${data.cpuName} (Cores: ${data.cpuCores}, Logical: ${data.cpuLogical})\n`;
+            text += `- Motherboard: ${data.motherboardManufacturer} ${data.motherboardProduct}\n`;
+            text += `- BIOS: Version ${data.biosVersion}\n`;
+            text += `- Total Memory: ${data.ramTotalGB} GB\n`;
+            if (Array.isArray(data.ramModules)) {
+                data.ramModules.forEach((m, i) => {
+                    text += `  * Slot ${i + 1}: ${m.capacityGB} GB (Speed: ${m.speedMHz} MHz, Manufacturer: ${m.manufacturer || "Unknown"})\n`;
+                });
+            } else if (data.ramModules) {
+                text += `  * Slot 1: ${data.ramModules.capacityGB} GB (Speed: ${data.ramModules.speedMHz} MHz, Manufacturer: ${data.ramModules.manufacturer || "Unknown"})\n`;
+            }
+            return text.trim();
+        }
+        
+        case "get_wifi_status": {
+            const script = `
+                try {
+                    $output = netsh wlan show interfaces
+                    $result = @{ success = $true; output = ($output -join "\`n") }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to retrieve Wi-Fi status: ${data.error}`);
+            }
+            return data.output.trim();
+        }
+        
+        case "get_network_latency": {
+            const target = args.target || "8.8.8.8";
+            const script = `
+                try {
+                    $ping = Test-Connection -ComputerName "${target}" -Count 3 -ErrorAction Stop
+                    $avgTime = ($ping | Measure-Object -Property ResponseTime -Average).Average
+                    $result = @{ success = $true; averageMs = [Math]::Round($avgTime, 1); received = $ping.Count }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                return `Failed to ping target '${target}': ${data.error}`;
+            }
+            return `Ping latency results to '${target}':\n- Average response time: ${data.averageMs} ms\n- Packets received: ${data.received}/3`;
         }
         
         default:

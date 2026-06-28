@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (23 total)](#-available-tools-23-total)
+7. [Available Tools (26 total)](#-available-tools-26-total)
 
 ---
 
@@ -19,11 +19,14 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 
 ### 💻 System & Resource Monitoring
 * **get_system_status**: CPU load, RAM usage, primary disk (C:) free capacity, and system uptime.
+* **get_system_info**: Retrieve detailed static system hardware specifications (CPU, motherboard, RAM slots, OS, BIOS).
 * **get_disk_space**: Returns storage space metrics (total, used, free) for all active system drives.
 * **get_top_processes**: Top 5 CPU-intensive running processes with PIDs and CPU percentages.
 * **get_battery_status**: Battery health percentage, charging state, and estimated remaining minutes (laptops).
 * **get_network_info**: Retrieves local IPv4 addresses, active network adapters, and external IP.
+* **get_network_latency**: Test latency (ping response time) to major targets (e.g. google.com).
 * **get_wifi_networks**: Scans and lists nearby Wi-Fi network SSIDs and signal strengths.
+* **get_wifi_status**: Retrieves status details of the currently active Wi-Fi connection (SSID, Signal quality, Transmission rate).
 * **get_gpu_info**: GPU graphics card details, driver versions, and VRAM memory.
 * **get_audio_devices**: Lists available system output and input audio hardware controllers.
 
@@ -185,3 +188,6 @@ npm start "Check the battery status"
 | `get_disk_space`   | None | Gets storage metrics (total, used, free) for all active drives. |
 | `take_screenshot`  | `filename` (string) | Captures primary display screenshot and saves it locally. |
 | `get_wifi_networks`| None | Scans and lists nearby Wi-Fi network SSIDs and signal strengths. |
+| `get_system_info`  | None | Retrieves static system specs (Motherboard, CPU, RAM modules info). |
+| `get_wifi_status`  | None | Retrieves details of current Wi-Fi SSID, rate, and signal quality. |
+| `get_network_latency`| `target` (string) | Tests latency (ping response time) to custom or default addresses. |
