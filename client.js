@@ -233,8 +233,28 @@ function pruneToolsForLocalModel(query, mcpTools) {
     }
     
     // 6. Network status
-    if (lowerQuery.includes('network') || lowerQuery.includes('netzwerk') || lowerQuery.includes('ip') || lowerQuery.includes('wifi') || lowerQuery.includes('wlan')) {
+    if (lowerQuery.includes('network') || lowerQuery.includes('netzwerk') || lowerQuery.includes('ip')) {
         return mcpTools.filter(t => t.name === 'get_network_info');
+    }
+    
+    // 7. Wi-Fi scanning
+    if (lowerQuery.includes('wifi') || lowerQuery.includes('wlan') || lowerQuery.includes('ssid')) {
+        return mcpTools.filter(t => t.name === 'get_wifi_networks');
+    }
+    
+    // 8. Screenshot capture
+    if (lowerQuery.includes('screenshot') || lowerQuery.includes('bildschirmfoto') || lowerQuery.includes('screen') || lowerQuery.includes('capture')) {
+        return mcpTools.filter(t => t.name === 'take_screenshot');
+    }
+    
+    // 9. Storage disk space metrics
+    if (lowerQuery.includes('disk') || lowerQuery.includes('space') || lowerQuery.includes('festplatte') || lowerQuery.includes('speicher') || lowerQuery.includes('drive') || lowerQuery.includes('laufwerk')) {
+        return mcpTools.filter(t => t.name === 'get_disk_space');
+    }
+    
+    // 10. Recycle bin clearing
+    if (lowerQuery.includes('recycle') || lowerQuery.includes('bin') || lowerQuery.includes('papierkorb') || lowerQuery.includes('leeren')) {
+        return mcpTools.filter(t => t.name === 'empty_recycle_bin');
     }
     
     // Fallback core tools list (max 3-4 tools)

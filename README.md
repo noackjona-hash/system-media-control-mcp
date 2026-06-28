@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (19 total)](#-available-tools-19-total)
+7. [Available Tools (23 total)](#-available-tools-23-total)
 
 ---
 
@@ -19,9 +19,11 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 
 ### 💻 System & Resource Monitoring
 * **get_system_status**: CPU load, RAM usage, primary disk (C:) free capacity, and system uptime.
+* **get_disk_space**: Returns storage space metrics (total, used, free) for all active system drives.
 * **get_top_processes**: Top 5 CPU-intensive running processes with PIDs and CPU percentages.
 * **get_battery_status**: Battery health percentage, charging state, and estimated remaining minutes (laptops).
-* **get_network_info**: Retrieves local IPv4 addresses, active network adapters, Wi-Fi SSID, and external IP.
+* **get_network_info**: Retrieves local IPv4 addresses, active network adapters, and external IP.
+* **get_wifi_networks**: Scans and lists nearby Wi-Fi network SSIDs and signal strengths.
 * **get_gpu_info**: GPU graphics card details, driver versions, and VRAM memory.
 * **get_audio_devices**: Lists available system output and input audio hardware controllers.
 
@@ -37,6 +39,8 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 * **set_clipboard**: Copies a text string to the system clipboard.
 * **open_url**: Launches a website URL in the default web browser.
 * **launch_app**: Spawns a desktop application by command name (e.g. `notepad`, `calc`, `explorer`).
+* **take_screenshot**: Captures a PNG screenshot of the primary screen and saves it locally.
+* **empty_recycle_bin**: Empties the Windows Recycle Bin.
 * **show_desktop**: Minimizes all active GUI windows instantly.
 
 ---
@@ -164,3 +168,7 @@ npm start "Check the battery status"
 | `get_gpu_info` | None | Returns GPU name, driver version, memory, and status. |
 | `get_audio_devices`| None | Lists all active audio output and input devices. |
 | `close_process` | `target` (string) | Force closes process by name or PID. |
+| `empty_recycle_bin`| None | Empties the Windows Recycle Bin. |
+| `get_disk_space`   | None | Gets storage metrics (total, used, free) for all active drives. |
+| `take_screenshot`  | `filename` (string) | Captures primary display screenshot and saves it locally. |
+| `get_wifi_networks`| None | Scans and lists nearby Wi-Fi network SSIDs and signal strengths. |

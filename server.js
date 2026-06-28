@@ -255,6 +255,43 @@ const toolsList = [
             },
             required: ["target"]
         }
+    },
+    {
+        name: "empty_recycle_bin",
+        description: "Empty the Windows Recycle Bin.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_disk_space",
+        description: "Get space metrics (total, used, free) for all active storage drives.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "take_screenshot",
+        description: "Capture a PNG screenshot of the primary display screen and save it locally.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                filename: {
+                    type: "string",
+                    description: "Optional custom filename to save the screenshot. Defaults to 'screenshot.png' in the workspace directory."
+                }
+            }
+        }
+    },
+    {
+        name: "get_wifi_networks",
+        description: "Scan and list nearby Wi-Fi network SSIDs and signal strengths.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
     }
 ];
 
@@ -878,6 +915,131 @@ ${text.replace(/'/g, "''")}
                 throw new Error(`Failed to close process: ${data.error}`);
             }
             return "Successfully closed process matching: " + target;
+        }
+        
+        case "empty_recycle_bin": {
+            const { exec } = require('child_process');
+            const fs = require('fs');
+            
+            const driveLetters = 'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+            for (const letter of driveLetters) {
+                const binPath = `${letter}:\\$Recycle.Bin`;
+                try {
+                    if (fs.existsSync(binPath)) {
+                        exec(`rd /s /q "${binPath}"`);
+                    }
+                } catch (e) {
+                    // Ignore checking errors on locked/protected drives
+                }
+            }
+            return "Successfully started emptying the Windows Recycle Bin in the background.";
+        }
+        
+        case "get_disk_space": {
+            const script = `
+                $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+                $diskList = @()
+                foreach ($disk in $disks) {
+                    $total = [Math]::Round($disk.Size / 1GB, 2)
+                    $free = [Math]::Round($disk.FreeSpace / 1GB, 2)
+                    $used = [Math]::Round($total - $free, 2)
+                    $percent = [Math]::Round(($used / $total) * 100, 2)
+                    $diskList += @{
+                        drive = $disk.DeviceID
+                        totalGB = $total
+                        usedGB = $used
+                        freeGB = $free
+                        percentUsed = $percent
+                    }
+                }
+                $result = @{ list = $diskList }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            let text = "Storage Disk Space:\n";
+            data.list.forEach((disk) => {
+                text += "- Drive " + disk.drive + " -> Total: " + disk.totalGB + " GB, Used: " + disk.usedGB + " GB (" + disk.percentUsed + "%), Free: " + disk.freeGB + " GB\n";
+            });
+            return text.trim();
+        }
+        
+        case "take_screenshot": {
+            const filename = args.filename || "screenshot.png";
+            const path = require('path');
+            const targetPath = path.resolve(process.cwd(), filename);
+            
+            const script = `
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms
+                    Add-Type -AssemblyName System.Drawing
+                    $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+                    $bitmap = New-Object System.Drawing.Bitmap $screen.Bounds.Width, $screen.Bounds.Height
+                    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                    $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $screen.Bounds.Size)
+                    $bitmap.Save("${targetPath.replace(/\\/g, '\\\\')}", [System.Drawing.Imaging.ImageFormat]::Png)
+                    $graphics.Dispose()
+                    $bitmap.Dispose()
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to take screenshot: ${data.error}`);
+            }
+            return "Screenshot successfully captured and saved to: " + targetPath;
+        }
+        
+        case "get_wifi_networks": {
+            const script = `
+                try {
+                    $networks = netsh wlan show networks mode=bssid
+                    $result = @{ success = $true; output = ($networks -join "\`n") }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to scan Wi-Fi networks: ${data.error}`);
+            }
+            
+            const lines = data.output.split('\n');
+            let currentSsid = "";
+            const wifiList = [];
+            lines.forEach(line => {
+                const matchSsid = line.match(/^SSID\s+\d+\s+:\s+(.*)$/);
+                if (matchSsid) {
+                    currentSsid = matchSsid[1].trim();
+                }
+                const matchSignal = line.match(/^\s+Signal\s+:\s+(\d+)%/);
+                if (matchSignal && currentSsid) {
+                    wifiList.push({ ssid: currentSsid, signal: matchSignal[1] });
+                    currentSsid = "";
+                }
+            });
+            
+            if (wifiList.length === 0) {
+                return "No nearby Wi-Fi networks found, or Wi-Fi adapter is disabled.";
+            }
+            
+            let text = "Nearby Wi-Fi Networks:\n";
+            const unique = [];
+            wifiList.forEach(w => {
+                if (!unique.some(x => x.ssid === w.ssid)) {
+                    unique.push(w);
+                }
+            });
+            unique.forEach((w, idx) => {
+                text += (idx + 1) + ". SSID: \"" + w.ssid + "\" (Signal: " + w.signal + "%)\n";
+            });
+            return text.trim();
         }
         
         default:
