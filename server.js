@@ -321,6 +321,22 @@ const toolsList = [
                 }
             }
         }
+    },
+    {
+        name: "clear_clipboard",
+        description: "Clear all text contents currently on the Windows clipboard.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "get_dns_servers",
+        description: "Retrieve configured DNS server IP addresses for the active network adapters.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
     }
 ];
 
@@ -389,7 +405,7 @@ async function callTool(name, args) {
                     int j();
                     int GetMasterVolumeLevelScalar(out float pfLevel);
                     int k(); int l(); int m(); int n();
-                    int SetMute(bool bMute, Guid pguidEventContext);
+                    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
                     int GetMute(out bool pbMute);
                 }
                 [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -448,7 +464,7 @@ async function callTool(name, args) {
                     int j();
                     int GetMasterVolumeLevelScalar(out float pfLevel);
                     int k(); int l(); int m(); int n();
-                    int SetMute(bool bMute, Guid pguidEventContext);
+                    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
                     int GetMute(out bool pbMute);
                 }
                 [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -492,7 +508,7 @@ async function callTool(name, args) {
                     int j();
                     int GetMasterVolumeLevelScalar(out float pfLevel);
                     int k(); int l(); int m(); int n();
-                    int SetMute(bool bMute, Guid pguidEventContext);
+                    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
                     int GetMute(out bool pbMute);
                 }
                 [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -1159,6 +1175,59 @@ ${text.replace(/'/g, "''")}
                 return `Failed to ping target '${target}': ${data.error}`;
             }
             return `Ping latency results to '${target}':\n- Average response time: ${data.averageMs} ms\n- Packets received: ${data.received}/3`;
+        }
+        
+        case "clear_clipboard": {
+            const script = `
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+                    [System.Windows.Forms.Clipboard]::Clear()
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to clear clipboard: ${data.error}`);
+            }
+            return "Windows clipboard has been successfully cleared.";
+        }
+        
+        case "get_dns_servers": {
+            const script = `
+                try {
+                    $dns = Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object ServerAddresses -ne $null
+                    $list = @()
+                    foreach ($d in $dns) {
+                        $list += @{
+                            interfaceIndex = $d.InterfaceIndex
+                            interfaceAlias = $d.InterfaceAlias
+                            addresses = $d.ServerAddresses
+                        }
+                    }
+                    $result = @{ success = $true; list = $list }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to retrieve DNS servers: ${data.error}`);
+            }
+            if (!data.list || data.list.length === 0) {
+                return "No configured DNS servers detected.";
+            }
+            let text = "Configured DNS Servers:\n";
+            data.list.forEach(dns => {
+                const addrs = Array.isArray(dns.addresses) ? dns.addresses.join(', ') : dns.addresses;
+                text += `- Interface "${dns.interfaceAlias}" (Index: ${dns.interfaceIndex}): DNS = [${addrs}]\n`;
+            });
+            return text.trim();
         }
         
         default:

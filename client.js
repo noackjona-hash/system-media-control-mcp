@@ -223,7 +223,10 @@ function pruneToolsForLocalModel(query, mcpTools) {
     }
     
     // 4. Clipboard operations
-    if (lowerQuery.includes('clipboard') || lowerQuery.includes('zwischenablage') || lowerQuery.includes('copy') || lowerQuery.includes('paste') || lowerQuery.includes('kopier')) {
+    if (lowerQuery.includes('clipboard') || lowerQuery.includes('zwischenablage') || lowerQuery.includes('copy') || lowerQuery.includes('paste') || lowerQuery.includes('kopier') || lowerQuery.includes('clear') || lowerQuery.includes('leere')) {
+        if (lowerQuery.includes('clear') || lowerQuery.includes('leeren') || lowerQuery.includes('leere') || lowerQuery.includes('lösch')) {
+            return mcpTools.filter(t => t.name === 'clear_clipboard');
+        }
         return mcpTools.filter(t => t.name === 'get_clipboard' || t.name === 'set_clipboard');
     }
     
@@ -232,8 +235,11 @@ function pruneToolsForLocalModel(query, mcpTools) {
         return mcpTools.filter(t => t.name === 'open_url' || t.name === 'launch_app');
     }
     
-    // 6. Network status
-    if (lowerQuery.includes('network') || lowerQuery.includes('netzwerk') || lowerQuery.includes('ip')) {
+    // 6. Network status & DNS
+    if (lowerQuery.includes('network') || lowerQuery.includes('netzwerk') || lowerQuery.includes('ip') || lowerQuery.includes('dns') || lowerQuery.includes('name server')) {
+        if (lowerQuery.includes('dns') || lowerQuery.includes('name server') || lowerQuery.includes('nameserver')) {
+            return mcpTools.filter(t => t.name === 'get_dns_servers');
+        }
         return mcpTools.filter(t => t.name === 'get_network_info');
     }
     

@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (26 total)](#-available-tools-26-total)
+7. [Available Tools (28 total)](#-available-tools-28-total)
 
 ---
 
@@ -24,6 +24,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 * **get_top_processes**: Top 5 CPU-intensive running processes with PIDs and CPU percentages.
 * **get_battery_status**: Battery health percentage, charging state, and estimated remaining minutes (laptops).
 * **get_network_info**: Retrieves local IPv4 addresses, active network adapters, and external IP.
+* **get_dns_servers**: Retrieves configured DNS server IP addresses for the active network interfaces.
 * **get_network_latency**: Test latency (ping response time) to major targets (e.g. google.com).
 * **get_wifi_networks**: Scans and lists nearby Wi-Fi network SSIDs and signal strengths.
 * **get_wifi_status**: Retrieves status details of the currently active Wi-Fi connection (SSID, Signal quality, Transmission rate).
@@ -40,6 +41,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 ### 📋 Automation & Clipboard Utilities
 * **get_clipboard**: Reads text contents currently on the Windows clipboard.
 * **set_clipboard**: Copies a text string to the system clipboard.
+* **clear_clipboard**: Clears all text contents currently on the Windows clipboard.
 * **open_url**: Launches a website URL in the default web browser.
 * **launch_app**: Spawns a desktop application by command name (e.g. `notepad`, `calc`, `explorer`).
 * **take_screenshot**: Captures a PNG screenshot of the primary screen and saves it locally.
@@ -191,3 +193,5 @@ npm start "Check the battery status"
 | `get_system_info`  | None | Retrieves static system specs (Motherboard, CPU, RAM modules info). |
 | `get_wifi_status`  | None | Retrieves details of current Wi-Fi SSID, rate, and signal quality. |
 | `get_network_latency`| `target` (string) | Tests latency (ping response time) to custom or default addresses. |
+| `clear_clipboard`  | None | Clears all text contents currently on the Windows clipboard. |
+| `get_dns_servers`  | None | Retrieves configured DNS server IP addresses for the network interface. |
