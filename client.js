@@ -673,6 +673,8 @@ async function main() {
         const geminiKey = process.env.GEMINI_API_KEY;
         const openAIKey = process.env.OPENAI_API_KEY;
         const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        const groqKey = process.env.GROQ_API_KEY;
+        const githubToken = process.env.GITHUB_TOKEN;
         const localBase = process.env.LOCAL_API_BASE;
         
         // Auto-detect provider if not explicitly configured
@@ -683,6 +685,10 @@ async function main() {
                 provider = 'openai';
             } else if (anthropicKey && anthropicKey !== 'your_anthropic_api_key_here') {
                 provider = 'anthropic';
+            } else if (groqKey && groqKey !== 'your_groq_api_key_here') {
+                provider = 'groq';
+            } else if (githubToken && githubToken !== 'your_github_token_here') {
+                provider = 'github';
             } else if (localBase) {
                 provider = 'local';
             } else {
@@ -700,6 +706,12 @@ async function main() {
                     await runOpenAI(openAIKey, q, mcpTools, undefined, process.env.OPENAI_MODEL || "gpt-4o-mini");
                 } else if (provider === 'anthropic') {
                     await runAnthropic(anthropicKey, q, mcpTools);
+                } else if (provider === 'groq') {
+                    const groqModel = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+                    await runOpenAI(groqKey, q, mcpTools, "https://api.groq.com/openai/v1", groqModel);
+                } else if (provider === 'github') {
+                    const githubModel = process.env.GITHUB_MODEL || "gpt-4o";
+                    await runOpenAI(githubToken, q, mcpTools, "https://models.inference.ai.azure.com", githubModel);
                 } else if (provider === 'local') {
                     const localModel = process.env.LOCAL_MODEL || "llama3";
                     await runOpenAI('local-key', q, mcpTools, localBase, localModel);

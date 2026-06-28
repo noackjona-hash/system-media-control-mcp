@@ -97,7 +97,7 @@ graph TD
 Create a file named `.env` in the root folder (automatically ignored by git) and set your preferred AI provider:
 
 ```env
-# Choose AI Provider: gemini, openai, anthropic, local, mock
+# Choose AI Provider: gemini, openai, anthropic, groq, github, local, mock
 AI_PROVIDER=gemini
 
 # Google Gemini API
@@ -112,9 +112,17 @@ OPENAI_MODEL=gpt-4o-mini
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 
+# Groq AI API
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# GitHub Models API
+GITHUB_TOKEN=ghp_...
+GITHUB_MODEL=gpt-4o
+
 # Local AI / Ollama / LM Studio (OpenAI-compatible)
 LOCAL_API_BASE=http://localhost:11434/v1
-LOCAL_MODEL=llama3
+LOCAL_MODEL=llama3.2:1b
 ```
 *(If no API keys are found or configured, it defaults to **Mock Mode**, running keyword analysis locally to simulate tool execution. Perfect for offline testing!)*
 
