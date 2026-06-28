@@ -282,6 +282,11 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
                     });
                 }
             }
+            // Inject strict final system reminder to avoid model confusion/irrelevant questions
+            messages.push({
+                role: "user",
+                content: "Die Tools wurden erfolgreich ausgeführt. Informiere den Nutzer kurz und sachlich, dass die Aktion erledigt ist. Stelle keine Gegenfragen!"
+            });
         } else {
             // Stage 2: Scan message.content for JSON-like blocks if native tool calls is empty
             const content = message.content || "";
@@ -328,7 +333,7 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
                         // Feed back to TinyLLM model
                         messages.push({
                             role: "user",
-                            content: `System Response (Tool ${name} executed successfully): ${toolOutput}`
+                            content: `System Response (Tool ${name} executed successfully): ${toolOutput}. Die Tools wurden erfolgreich ausgeführt. Informiere den Nutzer kurz und sachlich, dass die Aktion erledigt ist. Stelle keine Gegenfragen!`
                         });
                     } catch (err) {
                         logError(`MCP execution failed: ${err.message}`);
