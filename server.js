@@ -184,16 +184,36 @@ const toolsList = [
     },
     {
         name: "open_url",
-        description: "Open a specified web URL in the default web browser.",
+        description: "Open a specified web URL in the default or a specified custom web browser.",
         inputSchema: {
             type: "object",
             properties: {
                 url: {
                     type: "string",
                     description: "The web address to open (e.g. 'https://github.com')."
+                },
+                browser: {
+                    type: "string",
+                    enum: ["chrome", "firefox", "edge", "brave"],
+                    description: "Optional browser name to open the URL in."
                 }
             },
             required: ["url"]
+        }
+    },
+    {
+        name: "send_keystrokes",
+        description: "Send keyboard keystrokes to the currently active foreground window to interact with web pages or apps (e.g. typing text, pressing Enter/Tab).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                keys: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "An array of keys to send in sequence (e.g. ['^t', 'google.com', '{ENTER}', '{DELAY 1000}', 'Antigravity', '{ENTER}']). Use '^' for Ctrl, '%' for Alt, '+' for Shift. Use '{DELAY X}' to wait X milliseconds."
+                }
+            },
+            required: ["keys"]
         }
     },
     {
@@ -765,9 +785,53 @@ ${text.replace(/'/g, "''")}
             if (!/^https?:\/\//i.test(url)) {
                 url = "https://" + url;
             }
+            const browserName = args.browser || "";
             const script = `
                 try {
-                    Start-Process "${url.replace(/"/g, '`"')}" -ErrorAction Stop
+                    $browser = "${browserName}"
+                    $url = "${url.replace(/"/g, '`"')}"
+                    if ($browser) {
+                        $paths = @()
+                        if ($browser -eq "chrome") {
+                            $paths = @(
+                                "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe",
+                                "\${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe",
+                                "$env:LocalAppData\\Google\\Chrome\\Application\\chrome.exe"
+                            )
+                        } elseif ($browser -eq "firefox") {
+                            $paths = @(
+                                "$env:ProgramFiles\\Mozilla Firefox\\firefox.exe",
+                                "\${env:ProgramFiles(x86)}\\Mozilla Firefox\\firefox.exe"
+                            )
+                        } elseif ($browser -eq "edge") {
+                            $paths = @(
+                                "\${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe",
+                                "$env:ProgramFiles\\Microsoft\\Edge\\Application\\msedge.exe"
+                            )
+                        } elseif ($browser -eq "brave") {
+                            $paths = @(
+                                "$env:ProgramFiles\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                                "\${env:ProgramFiles(x86)}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                                "$env:LocalAppData\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+                            )
+                        }
+                        
+                        $found = $null
+                        foreach ($p in $paths) {
+                            if (Test-Path $p) {
+                                $found = $p
+                                break
+                            }
+                        }
+                        
+                        if ($found) {
+                            Start-Process $found -ArgumentList $url -ErrorAction Stop
+                        } else {
+                            Start-Process $url -ErrorAction Stop
+                        }
+                    } else {
+                        Start-Process $url -ErrorAction Stop
+                    }
                     $result = @{ success = $true }
                 } catch {
                     $result = @{ success = $false; error = $_.Exception.Message }
@@ -780,6 +844,40 @@ ${text.replace(/'/g, "''")}
                 throw new Error(`Failed to open URL: ${data.error}`);
             }
             return `Successfully opened URL in browser: ${url}`;
+        }
+        
+        case "send_keystrokes": {
+            const keys = args.keys;
+            if (!Array.isArray(keys) || keys.length === 0) {
+                throw new Error("Missing or invalid 'keys' parameter. Must be a non-empty array of strings.");
+            }
+            
+            const psArray = keys.map(k => `"${k.replace(/"/g, '`"').replace(/\$/g, '`$')}"`).join(", ");
+            const script = `
+                try {
+                    $keys = @(${psArray})
+                    $wshell = New-Object -ComObject WScript.Shell
+                    foreach ($key in $keys) {
+                        if ($key -match '^\\{DELAY\\s+(\\d+)\\}$') {
+                            $delay = [int]$Matches[1]
+                            Start-Sleep -Milliseconds $delay
+                        } else {
+                            $wshell.SendKeys($key)
+                            Start-Sleep -Milliseconds 150
+                        }
+                    }
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to send keystrokes: ${data.error}`);
+            }
+            return "Successfully sent keystrokes to active window.";
         }
         
         case "launch_app": {

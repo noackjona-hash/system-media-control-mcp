@@ -149,7 +149,7 @@ async function runGemini(apiKey, query, mcpTools) {
 
     const chat = model.startChat();
     logInfo(`Sending prompt to Gemini: "${query}"`);
-    let result = await chat.sendMessage(query);
+    let result = await callWithRetry(() => chat.sendMessage(query), "Gemini");
     let response = result.response;
     
     let calls = response.functionCalls();
@@ -180,12 +180,57 @@ async function runGemini(apiKey, query, mcpTools) {
         }
         
         logStep(`Feeding tool results back to Gemini...`);
-        result = await chat.sendMessage(functionResponses);
+        result = await callWithRetry(() => chat.sendMessage(functionResponses), "Gemini");
         response = result.response;
         calls = response.functionCalls();
     }
     
     console.log(`\n${COLORS.green}${COLORS.bright}Gemini Final Response:${COLORS.reset}\n=================================\n${response.text()}\n=================================`);
+}
+
+// Retries a function if it encounters a rate limit (HTTP 429 / Rate Limit error)
+async function callWithRetry(fn, providerName = "AI") {
+    let delay = 2000; // start with 2 seconds delay
+    const maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            const isRateLimit = 
+                (err.status === 429) || 
+                (err.statusCode === 429) ||
+                (err.message && (
+                    err.message.includes("429") || 
+                    err.message.includes("rate_limit") || 
+                    err.message.includes("Quota exceeded") || 
+                    err.message.includes("too many requests") ||
+                    err.message.includes("ResourceExhausted") ||
+                    err.message.includes("limit")
+                ));
+                
+            if (isRateLimit && attempt < maxRetries) {
+                let waitMs = delay;
+                if (err.headers && err.headers['retry-after']) {
+                    const retryAfter = parseInt(err.headers['retry-after'], 10);
+                    if (!isNaN(retryAfter)) {
+                        waitMs = retryAfter * 1000;
+                    }
+                } else {
+                    // Try parsing retryDelay from Google Gemini errors (e.g. retryDelay: "21s")
+                    const matchSec = err.message.match(/retryDelay["']?\s*:\s*["']?(\d+)s/i) || err.message.match(/retry\s+after\s+(\d+)\s+seconds/i);
+                    if (matchSec) {
+                        waitMs = parseInt(matchSec[1], 10) * 1000;
+                    }
+                }
+                
+                logInfo(`[Rate Limit] ${providerName} returned 429 / Quota Exceeded. Waiting ${waitMs / 1000}s before retry (Attempt ${attempt}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, waitMs + 500)); // add 500ms safety buffer
+                delay *= 2; // double delay for next attempt
+            } else {
+                throw err;
+            }
+        }
+    }
 }
 
 // Aggressively extracts and sanitizes the JSON block from raw text
@@ -278,6 +323,11 @@ function pruneToolsForLocalModel(query, mcpTools) {
     if (lowerQuery.includes('ping') || lowerQuery.includes('latency') || lowerQuery.includes('latenz') || lowerQuery.includes('geschwindigkeit') || lowerQuery.includes('speedtest')) {
         return mcpTools.filter(t => t.name === 'get_network_latency');
     }
+
+    // 13. UI Automation / Keystrokes
+    if (lowerQuery.includes('key') || lowerQuery.includes('taste') || lowerQuery.includes('tippen') || lowerQuery.includes('type') || lowerQuery.includes('schreibe') || lowerQuery.includes('interact') || lowerQuery.includes('automation') || lowerQuery.includes('press')) {
+        return mcpTools.filter(t => t.name === 'send_keystrokes');
+    }
     
     // Fallback core tools list (max 3-4 tools)
     const fallbackTools = ['get_system_status', 'get_volume', 'get_top_processes', 'open_url'];
@@ -339,11 +389,11 @@ Once you have retrieved all necessary information or successfully performed the 
         }
         
         logStep(`Sending request to AI (${modelName})...`);
-        const response = await openai.chat.completions.create({
+        const response = await callWithRetry(() => openai.chat.completions.create({
             model: modelName,
             messages,
             tools
-        });
+        }), modelName);
 
         const choice = response.choices[0];
         const message = choice.message;
@@ -523,25 +573,30 @@ async function runAnthropic(apiKey, query, mcpTools) {
     let running = true;
     while (running) {
         logStep("Sending request to Anthropic (Claude)...");
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-                "x-api-key": apiKey,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            body: JSON.stringify({
-                model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022",
-                max_tokens: 1024,
-                tools,
-                messages
-            })
-        });
-
-        if (!response.ok) {
-            const errBody = await response.text();
-            throw new Error(`Anthropic API error: ${response.status} ${response.statusText} - ${errBody}`);
-        }
+        const response = await callWithRetry(async () => {
+            const res = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                    "x-api-key": apiKey,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022",
+                    max_tokens: 1024,
+                    tools,
+                    messages
+                })
+            });
+            if (!res.ok) {
+                const errBody = await res.text();
+                const err = new Error(`Anthropic API error: ${res.status} ${res.statusText} - ${errBody}`);
+                err.status = res.status;
+                err.headers = { 'retry-after': res.headers.get('retry-after') };
+                throw err;
+            }
+            return res;
+        }, "Anthropic");
 
         const data = await response.json();
         const assistantMessage = {

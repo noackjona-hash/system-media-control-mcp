@@ -11,7 +11,7 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 4. [Installation & Setup](#-installation--setup)
 5. [Configuration](#%EF%B8%8F-configuration)
 6. [Usage](#-usage)
-7. [Available Tools (29 total)](#-available-tools-29-total)
+7. [Available Tools (30 total)](#-available-tools-30-total)
 
 ---
 
@@ -43,7 +43,8 @@ A Node.js-based Model Context Protocol (MCP) automation system that enables Arti
 * **get_clipboard**: Reads text contents currently on the Windows clipboard.
 * **set_clipboard**: Copies a text string to the system clipboard.
 * **clear_clipboard**: Clears all text contents currently on the Windows clipboard.
-* **open_url**: Launches a website URL in the default web browser.
+* **open_url**: Launches a website URL in the default or a specified browser (Chrome, Firefox, Edge, Brave).
+* **send_keystrokes**: Sends sequential keyboard commands and inputs to automate apps and pages.
 * **launch_app**: Spawns a desktop application by command name (e.g. `notepad`, `calc`, `explorer`).
 * **take_screenshot**: Captures a PNG screenshot of the primary screen and saves it locally.
 * **empty_recycle_bin**: Empties the Windows Recycle Bin.
@@ -180,7 +181,7 @@ npm start "Check the battery status"
 | `system_power_control`| `action` (string)| Performs power action: `lock`, `sleep`, `shutdown`, `restart`, `abort_shutdown`. |
 | `get_clipboard` | None | Returns text content on the Windows clipboard. |
 | `set_clipboard` | `text` (string) | Copies the text to the Windows clipboard. |
-| `open_url` | `url` (string) | Opens the URL in the default browser. |
+| `open_url` | `url` (string), `browser` (string) | Opens the URL in default or specified browser (chrome, firefox, edge, brave). |
 | `launch_app` | `app` (string) | Launches the application (e.g. `notepad`). |
 | `get_network_info` | None | Returns local IPs, network adapter name, external IP, and SSID. |
 | `show_desktop` | None | Minimizes all active windows to show the desktop. |
@@ -197,3 +198,4 @@ npm start "Check the battery status"
 | `clear_clipboard`  | None | Clears all text contents currently on the Windows clipboard. |
 | `get_dns_servers`  | None | Retrieves configured DNS server IP addresses for the network interface. |
 | `get_active_window`| None | Retrieves the title, process name, and PID of the focused foreground window. |
+| `send_keystrokes`  | `keys` (array of strings) | Sends keystrokes to active window (type, tabs, enter, delays). |
