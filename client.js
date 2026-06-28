@@ -188,42 +188,19 @@ async function runGemini(apiKey, query, mcpTools) {
     console.log(`\n${COLORS.green}${COLORS.bright}Gemini Final Response:${COLORS.reset}\n=================================\n${response.text()}\n=================================`);
 }
 
-// Bracket-matching tokenizer to extract JSON block from text
-function extractJsonBlock(text) {
-    const startIndex = text.indexOf('{');
-    if (startIndex === -1) return null;
-    
-    let braceCount = 0;
-    let inString = false;
-    let escape = false;
-    
-    for (let i = startIndex; i < text.length; i++) {
-        const char = text[i];
-        if (escape) {
-            escape = false;
-            continue;
-        }
-        if (char === '\\') {
-            escape = true;
-            continue;
-        }
-        if (char === '"') {
-            inString = !inString;
-            continue;
-        }
-        if (!inString) {
-            if (char === '{') {
-                braceCount++;
-            } else if (char === '}') {
-                braceCount--;
-                if (braceCount === 0) {
-                    return text.substring(startIndex, i + 1);
-                }
-            }
-        }
+// Aggressively extracts and sanitizes the JSON block from raw text
+function sanitizeJsonString(text) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end < start) {
+        return null;
     }
-    // If braces are unbalanced (e.g. truncated JSON), return the rest of the string
-    return text.substring(startIndex);
+    let slice = text.substring(start, end + 1);
+    
+    // Clean up escaped quotes \" or \\"
+    slice = slice.replace(/\\"/g, '"');
+    
+    return slice.trim();
 }
 
 async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName = "gpt-4o-mini") {
@@ -298,7 +275,7 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
             const mentionsTool = mcpTools.some(tool => content.includes(tool.name));
             
             if (hasJsonIndicator || (content.includes('{') && mentionsTool)) {
-                const jsonStr = extractJsonBlock(content);
+                const jsonStr = sanitizeJsonString(content);
                 let toolCallObj = null;
                 let parseError = null;
                 
@@ -318,7 +295,7 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
                         parseError = err;
                     }
                 } else {
-                    parseError = new Error("Brace tokenizer could not isolate a JSON block.");
+                    parseError = new Error("Sanitizer could not isolate a JSON block.");
                 }
                 
                 if (toolCallObj && !parseError) {
@@ -351,10 +328,10 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
                         logError(`JSON parsing/validation failed: ${parseError.message}`);
                         logStep(`${COLORS.yellow}${COLORS.bright}Malformed tool call from local model. Triggering self-correction prompt (Try ${rePromptAttempts}/${maxAttempts})...${COLORS.reset}`);
                         
-                        // Push correction instructions
+                        // Push correction instructions containing original user query
                         messages.push({
                             role: "user",
-                            content: `System Instruction: The JSON tool call you just outputted was malformed, incomplete, or invalid. Error details: ${parseError.message}. Please correct the JSON syntax, close all brackets, and output the tool call again in this exact JSON format: {"name": "tool_name", "arguments": {...}}. Do not output anything other than the raw JSON block.`
+                            content: `Du wolltest gerade die Aufgabe '${query}' erfüllen, aber dein JSON-Format war ungültig. Fehler-Details: ${parseError.message}. Antworte NUR mit dem korrekten JSON-Code! Output only valid JSON. Close all brackets and quotes. Format: {"name": "tool_name", "arguments": {...}}`
                         });
                     } else {
                         logError(`Exceeded maximum correction attempts (${maxAttempts}). Treating response as final text.`);
