@@ -234,6 +234,9 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
     let running = true;
     let rePromptAttempts = 0;
     const maxAttempts = 2;
+    let totalCalls = 0;
+    const maxCallsLimit = 5;
+    let lastExecutedTool = null;
     let cleanHistoryLength = messages.length;
     
     while (running) {
@@ -259,9 +262,30 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
             rePromptAttempts = 0; // reset attempts on successful execution path
             for (const toolCall of message.tool_calls) {
                 const name = toolCall.function.name;
-                const args = JSON.parse(toolCall.function.arguments);
+                const argsStr = toolCall.function.arguments;
                 
-                logTool(`AI requested native: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                // Duplicate check
+                if (lastExecutedTool && lastExecutedTool.name === name && lastExecutedTool.argsStr === argsStr) {
+                    logError(`Loop protection: blocked duplicate tool call to ${name} with args ${argsStr}`);
+                    console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response (Loop Blocked):${COLORS.reset}\n=================================\nPC Agent: The AI model tried to repeat the same operation twice. Operation blocked to prevent loop.\n=================================`);
+                    running = false;
+                    break;
+                }
+                
+                // Max calls check
+                totalCalls++;
+                if (totalCalls > maxCallsLimit) {
+                    logError(`Loop protection: reached max tool calls limit of ${maxCallsLimit}`);
+                    console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response (Limit Reached):${COLORS.reset}\n=================================\nPC Agent: The AI model exceeded the execution limit of ${maxCallsLimit} steps. Execution stopped.\n=================================`);
+                    running = false;
+                    break;
+                }
+                
+                lastExecutedTool = { name, argsStr };
+
+                const args = JSON.parse(argsStr);
+                
+                logTool(`AI requested native: ${COLORS.bright}${name}${COLORS.reset} with args: ${argsStr}`);
                 try {
                     const toolOutput = await callMcpTool(name, args);
                     logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
@@ -324,8 +348,28 @@ Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
                     rePromptAttempts = 0; // reset
                     const name = toolCallObj.name;
                     const args = toolCallObj.arguments || toolCallObj.args || {};
+                    const argsStr = JSON.stringify(args);
                     
-                    logTool(`AI requested text-JSON: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                    // Duplicate check
+                    if (lastExecutedTool && lastExecutedTool.name === name && lastExecutedTool.argsStr === argsStr) {
+                        logError(`Loop protection: blocked duplicate tool call to ${name} with args ${argsStr}`);
+                        console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response (Loop Blocked):${COLORS.reset}\n=================================\nPC Agent: The AI model tried to repeat the same operation twice. Operation blocked to prevent loop.\n=================================`);
+                        running = false;
+                        break;
+                    }
+                    
+                    // Max calls check
+                    totalCalls++;
+                    if (totalCalls > maxCallsLimit) {
+                        logError(`Loop protection: reached max tool calls limit of ${maxCallsLimit}`);
+                        console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response (Limit Reached):${COLORS.reset}\n=================================\nPC Agent: The AI model exceeded the execution limit of ${maxCallsLimit} steps. Execution stopped.\n=================================`);
+                        running = false;
+                        break;
+                    }
+                    
+                    lastExecutedTool = { name, argsStr };
+                    
+                    logTool(`AI requested text-JSON: ${COLORS.bright}${name}${COLORS.reset} with args: ${argsStr}`);
                     try {
                         const toolOutput = await callMcpTool(name, args);
                         logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
