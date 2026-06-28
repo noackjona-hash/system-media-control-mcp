@@ -159,6 +159,72 @@ const toolsList = [
             type: "object",
             properties: {}
         }
+    },
+    {
+        name: "get_clipboard",
+        description: "Get the current text contents from the Windows clipboard.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "set_clipboard",
+        description: "Write new text to the Windows clipboard.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    description: "The text to copy to the clipboard."
+                }
+            },
+            required: ["text"]
+        }
+    },
+    {
+        name: "open_url",
+        description: "Open a specified web URL in the default web browser.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                url: {
+                    type: "string",
+                    description: "The web address to open (e.g. 'https://github.com')."
+                }
+            },
+            required: ["url"]
+        }
+    },
+    {
+        name: "launch_app",
+        description: "Launch a Windows application or command (e.g. 'notepad', 'calc', 'explorer').",
+        inputSchema: {
+            type: "object",
+            properties: {
+                app: {
+                    type: "string",
+                    description: "The application name or command to execute."
+                }
+            },
+            required: ["app"]
+        }
+    },
+    {
+        name: "get_network_info",
+        description: "Get local network IP address, network adapter name, and external IP (if online).",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "show_desktop",
+        description: "Minimize all active GUI windows to show the Windows desktop.",
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
     }
 ];
 
@@ -529,6 +595,165 @@ async function callTool(name, args) {
                 responseText += `${idx + 1}. Process: ${p.name} (PID: ${p.pid}) - CPU Load: ${p.cpuPercent}%\n`;
             });
             return responseText.trim();
+        }
+        
+        case "get_clipboard": {
+            const script = `
+                try {
+                    $clip = Get-Clipboard -Raw -ErrorAction Stop
+                    if ($clip) {
+                        $result = @{ success = $true; text = $clip }
+                    } else {
+                        $result = @{ success = $true; text = "" }
+                    }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to read clipboard: ${data.error}`);
+            }
+            return data.text ? `Clipboard content:\n"${data.text}"` : "Clipboard is empty.";
+        }
+        
+        case "set_clipboard": {
+            const text = args.text || "";
+            const script = `
+                try {
+                    Set-Clipboard -Value @'
+${text.replace(/'/g, "''")}
+'@ -ErrorAction Stop
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to set clipboard: ${data.error}`);
+            }
+            return "Text copied to clipboard successfully.";
+        }
+        
+        case "open_url": {
+            let url = args.url;
+            if (!/^https?:\/\//i.test(url)) {
+                url = "https://" + url;
+            }
+            const script = `
+                try {
+                    Start-Process "${url.replace(/"/g, '`"')}" -ErrorAction Stop
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to open URL: ${data.error}`);
+            }
+            return `Successfully opened URL in browser: ${url}`;
+        }
+        
+        case "launch_app": {
+            const app = args.app;
+            const script = `
+                try {
+                    Start-Process "${app.replace(/"/g, '`"')}" -ErrorAction Stop
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to launch application: ${data.error}`);
+            }
+            return `Successfully launched application: ${app}`;
+        }
+        
+        case "get_network_info": {
+            const script = `
+                try {
+                    $localIps = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -Property IPAddress, InterfaceAlias
+                    $localList = @()
+                    foreach ($ip in $localIps) {
+                        $localList += @{ ip = $ip.IPAddress; adapter = $ip.InterfaceAlias }
+                    }
+                    
+                    $wifi = (netsh wlan show interfaces) | Select-String -Pattern '^\\s+SSID\\s+:\\s+(.+)'
+                    $ssid = $null
+                    if ($wifi) {
+                        $ssid = $wifi.Matches.Groups[1].Value.Trim()
+                    }
+                    
+                    $external = $null
+                    try {
+                        $external = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 2).Trim()
+                    } catch {}
+                    
+                    $result = @{
+                        success = $true
+                        local = $localList
+                        wifi = $ssid
+                        external = $external
+                    }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to read network info: ${data.error}`);
+            }
+            let details = "Network Information:\\n";
+            if (data.local && data.local.length > 0) {
+                details += "- Local IPs:\\n";
+                data.local.forEach(l => {
+                    details += "  * " + l.ip + " (" + l.adapter + ")\\n";
+                });
+            } else {
+                details += "- Local IP: Disconnected / Not found\\n";
+            }
+            if (data.wifi) {
+                details += "- Wi-Fi Network (SSID): " + data.wifi + "\\n";
+            }
+            if (data.external) {
+                details += "- External IP Address: " + data.external + "\\n";
+            } else {
+                details += "- External IP Address: Offline / Failed to resolve\\n";
+            }
+            return details.trim();
+        }
+        
+        case "show_desktop": {
+            const script = `
+                try {
+                    $shell = New-Object -ComObject Shell.Application
+                    $shell.MinimizeAll()
+                    $result = @{ success = $true }
+                } catch {
+                    $result = @{ success = $false; error = $_.Exception.Message }
+                }
+                $result | ConvertTo-Json -Compress
+            `;
+            const out = await runPowerShell(script);
+            const data = JSON.parse(out);
+            if (!data.success) {
+                throw new Error(`Failed to minimize windows: ${data.error}`);
+            }
+            return "All active windows minimized to show desktop.";
         }
         
         default:

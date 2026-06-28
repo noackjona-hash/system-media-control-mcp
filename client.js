@@ -21,7 +21,7 @@ const COLORS = {
     white: "\x1b[37m"
 };
 
-// Logging helpers
+// Logging helpers (English defaults)
 function logInfo(msg) {
     console.log(`${COLORS.green}${COLORS.bright}[Client]${COLORS.reset} ${msg}`);
 }
@@ -143,7 +143,7 @@ async function runGemini(apiKey, query, mcpTools) {
     }));
 
     const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         tools: [{ functionDeclarations }]
     });
 
@@ -188,8 +188,13 @@ async function runGemini(apiKey, query, mcpTools) {
     console.log(`\n${COLORS.green}${COLORS.bright}Gemini Final Response:${COLORS.reset}\n=================================\n${response.text()}\n=================================`);
 }
 
-async function runOpenAI(apiKey, query, mcpTools) {
-    const openai = new OpenAI({ apiKey });
+async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName = "gpt-4o-mini") {
+    const config = { apiKey };
+    if (baseURL) {
+        config.baseURL = baseURL;
+    }
+    const openai = new OpenAI(config);
+    
     const tools = mcpTools.map(tool => ({
         type: "function",
         function: {
@@ -203,9 +208,9 @@ async function runOpenAI(apiKey, query, mcpTools) {
     let running = true;
     
     while (running) {
-        logStep(`Sending request to OpenAI...`);
+        logStep(`Sending request to AI...`);
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: modelName,
             messages,
             tools
         });
@@ -219,7 +224,7 @@ async function runOpenAI(apiKey, query, mcpTools) {
                 const name = toolCall.function.name;
                 const args = JSON.parse(toolCall.function.arguments);
                 
-                logTool(`OpenAI requested: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                logTool(`AI requested: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
                 try {
                     const toolOutput = await callMcpTool(name, args);
                     logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
@@ -241,7 +246,86 @@ async function runOpenAI(apiKey, query, mcpTools) {
                 }
             }
         } else {
-            console.log(`\n${COLORS.green}${COLORS.bright}OpenAI Final Response:${COLORS.reset}\n=================================\n${message.content}\n=================================`);
+            console.log(`\n${COLORS.green}${COLORS.bright}AI Final Response:${COLORS.reset}\n=================================\n${message.content}\n=================================`);
+            running = false;
+        }
+    }
+}
+
+async function runAnthropic(apiKey, query, mcpTools) {
+    const messages = [{ role: "user", content: query }];
+    const tools = mcpTools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema
+    }));
+
+    let running = true;
+    while (running) {
+        logStep("Sending request to Anthropic (Claude)...");
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            body: JSON.stringify({
+                model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022",
+                max_tokens: 1024,
+                tools,
+                messages
+            })
+        });
+
+        if (!response.ok) {
+            const errBody = await response.text();
+            throw new Error(`Anthropic API error: ${response.status} ${response.statusText} - ${errBody}`);
+        }
+
+        const data = await response.json();
+        const assistantMessage = {
+            role: "assistant",
+            content: data.content
+        };
+        messages.push(assistantMessage);
+
+        const toolCalls = data.content.filter(block => block.type === "tool_use");
+        
+        if (toolCalls.length > 0) {
+            const toolResults = [];
+            for (const call of toolCalls) {
+                const name = call.name;
+                const args = call.input;
+                const id = call.id;
+                
+                logTool(`Claude requested: ${COLORS.bright}${name}${COLORS.reset} with args: ${JSON.stringify(args)}`);
+                try {
+                    const toolOutput = await callMcpTool(name, args);
+                    logInfo(`MCP Server responded: "${toolOutput.replace(/\n/g, ' ')}"`);
+                    
+                    toolResults.push({
+                        type: "tool_result",
+                        tool_use_id: id,
+                        content: toolOutput
+                    });
+                } catch (err) {
+                    logError(`MCP execution failed: ${err.message}`);
+                    toolResults.push({
+                        type: "tool_result",
+                        tool_use_id: id,
+                        content: `Error: ${err.message}`,
+                        is_error: true
+                    });
+                }
+            }
+            messages.push({
+                role: "user",
+                content: toolResults
+            });
+        } else {
+            const textBlocks = data.content.filter(block => block.type === "text").map(block => block.text).join("\n");
+            console.log(`\n${COLORS.green}${COLORS.bright}Claude Final Response:${COLORS.reset}\n=================================\n${textBlocks}\n=================================`);
             running = false;
         }
     }
@@ -254,7 +338,7 @@ async function runMockAI(query, mcpTools) {
     let toolArgs = {};
     const lowerQuery = query.toLowerCase();
     
-    if (lowerQuery.includes('lautstärke') || lowerQuery.includes('volume') || lowerQuery.includes('laut') || lowerQuery.includes('leise')) {
+    if (lowerQuery.includes('volume') || lowerQuery.includes('sound') || lowerQuery.includes('loud')) {
         const match = lowerQuery.match(/(\d+)/);
         if (match) {
             toolName = 'set_volume';
@@ -262,23 +346,23 @@ async function runMockAI(query, mcpTools) {
         } else {
             toolName = 'get_volume';
         }
-    } else if (lowerQuery.includes('stumm') || lowerQuery.includes('mute')) {
+    } else if (lowerQuery.includes('mute')) {
         toolName = 'set_mute';
-        toolArgs = { mute: !lowerQuery.includes('unmute') && !lowerQuery.includes('lauter') };
-    } else if (lowerQuery.includes('paus') || lowerQuery.includes('play') || lowerQuery.includes('musik') || lowerQuery.includes('stopp')) {
+        toolArgs = { mute: !lowerQuery.includes('unmute') };
+    } else if (lowerQuery.includes('paus') || lowerQuery.includes('play') || lowerQuery.includes('music') || lowerQuery.includes('stop')) {
         toolName = 'media_control';
-        toolArgs = { action: 'play_pause' };
-    } else if (lowerQuery.includes('weiter') || lowerQuery.includes('next') || lowerQuery.includes('nächst')) {
+        toolArgs = { action: lowerQuery.includes('next') ? 'next_track' : (lowerQuery.includes('prev') ? 'prev_track' : 'play_pause') };
+    } else if (lowerQuery.includes('next') || lowerQuery.includes('skip')) {
         toolName = 'media_control';
         toolArgs = { action: 'next_track' };
-    } else if (lowerQuery.includes('zurück') || lowerQuery.includes('prev')) {
+    } else if (lowerQuery.includes('prev') || lowerQuery.includes('back')) {
         toolName = 'media_control';
         toolArgs = { action: 'prev_track' };
-    } else if (lowerQuery.includes('prozess') || lowerQuery.includes('task') || lowerQuery.includes('cpu consuming') || lowerQuery.includes('auslastung')) {
+    } else if (lowerQuery.includes('process') || lowerQuery.includes('task') || lowerQuery.includes('cpu consuming') || lowerQuery.includes('busy')) {
         toolName = 'get_top_processes';
-    } else if (lowerQuery.includes('akku') || lowerQuery.includes('battery') || lowerQuery.includes('lade')) {
+    } else if (lowerQuery.includes('battery') || lowerQuery.includes('power status') || lowerQuery.includes('charge')) {
         toolName = 'get_battery_status';
-    } else if (lowerQuery.includes('helligkeit') || lowerQuery.includes('brightness')) {
+    } else if (lowerQuery.includes('brightness') || lowerQuery.includes('screen dim')) {
         const match = lowerQuery.match(/(\d+)/);
         if (match) {
             toolName = 'set_brightness';
@@ -286,22 +370,46 @@ async function runMockAI(query, mcpTools) {
         } else {
             toolName = 'get_brightness';
         }
-    } else if (lowerQuery.includes('sperr') || lowerQuery.includes('lock')) {
+    } else if (lowerQuery.includes('lock')) {
         toolName = 'system_power_control';
         toolArgs = { action: 'lock' };
-    } else if (lowerQuery.includes('sleep') || lowerQuery.includes('ruhezustand')) {
+    } else if (lowerQuery.includes('sleep') || lowerQuery.includes('suspend')) {
         toolName = 'system_power_control';
         toolArgs = { action: 'sleep' };
-    } else if (lowerQuery.includes('herunterfahren') || lowerQuery.includes('shutdown')) {
+    } else if (lowerQuery.includes('shutdown')) {
         toolName = 'system_power_control';
         toolArgs = { action: 'shutdown' };
-    } else if (lowerQuery.includes('neustart') || lowerQuery.includes('restart')) {
+    } else if (lowerQuery.includes('restart') || lowerQuery.includes('reboot')) {
         toolName = 'system_power_control';
         toolArgs = { action: 'restart' };
-    } else if (lowerQuery.includes('abbrechen') || lowerQuery.includes('abort')) {
+    } else if (lowerQuery.includes('abort') || lowerQuery.includes('cancel shutdown')) {
         toolName = 'system_power_control';
         toolArgs = { action: 'abort_shutdown' };
-    } else if (lowerQuery.includes('ausgelastet') || lowerQuery.includes('status') || lowerQuery.includes('system') || lowerQuery.includes('pc')) {
+    } else if (lowerQuery.includes('clipboard') || lowerQuery.includes('copy') || lowerQuery.includes('paste')) {
+        if (lowerQuery.includes('copy') || lowerQuery.includes('write') || lowerQuery.includes('set')) {
+            const match = query.match(/(?:copy|write|set|to)\s+['"](.+?)['"]/i) || query.match(/(?:copy|write|set)\s+(.+?)(?:\s+to|$)/i);
+            toolName = 'set_clipboard';
+            toolArgs = { text: match ? match[1].trim() : "Copied from PC Agent" };
+        } else {
+            toolName = 'get_clipboard';
+        }
+    } else if (lowerQuery.includes('open') || lowerQuery.includes('browser') || lowerQuery.includes('web')) {
+        const match = query.match(/open\s+(https?:\/\/[^\s]+|[a-z0-9.-]+\.[a-z]{2,})/i);
+        if (match) {
+            toolName = 'open_url';
+            toolArgs = { url: match[1] };
+        } else {
+            const appMatch = query.match(/open\s+([a-z0-9_-]+)/i) || query.match(/launch\s+([a-z0-9_-]+)/i);
+            if (appMatch) {
+                toolName = 'launch_app';
+                toolArgs = { app: appMatch[1] };
+            }
+        }
+    } else if (lowerQuery.includes('network') || lowerQuery.includes('ip') || lowerQuery.includes('wifi') || lowerQuery.includes('connection')) {
+        toolName = 'get_network_info';
+    } else if (lowerQuery.includes('desktop') || lowerQuery.includes('minimize all') || lowerQuery.includes('show desktop')) {
+        toolName = 'show_desktop';
+    } else if (lowerQuery.includes('status') || lowerQuery.includes('system') || lowerQuery.includes('pc') || lowerQuery.includes('usage')) {
         toolName = 'get_system_status';
     }
     
@@ -323,25 +431,60 @@ async function main() {
         const mcpTools = await runHandshake();
         logInfo(`Discovered ${mcpTools.length} tools from server: ${mcpTools.map(t => t.name).join(', ')}`);
         
+        // Provider routing
+        let provider = process.env.AI_PROVIDER || "";
         const geminiKey = process.env.GEMINI_API_KEY;
         const openAIKey = process.env.OPENAI_API_KEY;
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        const localBase = process.env.LOCAL_API_BASE;
         
+        // Auto-detect provider if not explicitly configured
+        if (!provider) {
+            if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
+                provider = 'gemini';
+            } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
+                provider = 'openai';
+            } else if (anthropicKey && anthropicKey !== 'your_anthropic_api_key_here') {
+                provider = 'anthropic';
+            } else if (localBase) {
+                provider = 'local';
+            } else {
+                provider = 'mock';
+            }
+        }
+        
+        logInfo(`Active AI Provider: ${COLORS.bright}${provider.toUpperCase()}${COLORS.reset}`);
+        
+        async function runRequest(q) {
+            try {
+                if (provider === 'gemini') {
+                    await runGemini(geminiKey, q, mcpTools);
+                } else if (provider === 'openai') {
+                    await runOpenAI(openAIKey, q, mcpTools, undefined, process.env.OPENAI_MODEL || "gpt-4o-mini");
+                } else if (provider === 'anthropic') {
+                    await runAnthropic(anthropicKey, q, mcpTools);
+                } else if (provider === 'local') {
+                    const localModel = process.env.LOCAL_MODEL || "llama3";
+                    await runOpenAI('local-key', q, mcpTools, localBase, localModel);
+                } else {
+                    await runMockAI(q, mcpTools);
+                }
+            } catch (err) {
+                logError(`Failed to process AI execution: ${err.message}`);
+            }
+        }
+
         let query = process.argv.slice(2).join(' ').trim();
         
         if (query) {
-            // Single-shot run mode via CLI args
-            if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
-                await runGemini(geminiKey, query, mcpTools);
-            } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
-                await runOpenAI(openAIKey, query, mcpTools);
-            } else {
-                await runMockAI(query, mcpTools);
-            }
+            // CLI Single-Shot Mode
+            await runRequest(query);
         } else {
-            // Interactive persistent loop
-            console.log(`\n${COLORS.yellow}${COLORS.bright}--- PC Agent Interactive Prompt Mode ---${COLORS.reset}`);
-            console.log(`Type queries in natural language (e.g. "Wie ausgelastet ist mein PC?" or "Mute").`);
-            console.log(`Type ${COLORS.bright}'exit'${COLORS.reset} or ${COLORS.bright}'q'${COLORS.reset} to quit.\n`);
+            // Continuous Interactive English Console Loop
+            console.log(`\n${COLORS.yellow}${COLORS.bright}--- PC Windows Agent (Interactive Mode) ---${COLORS.reset}`);
+            console.log(`Ask questions or issue commands in natural language.`);
+            console.log(`Supported actions: volume/brightness control, media player buttons, clipboard copy/paste, URL/app launcher, power commands.`);
+            console.log(`Type ${COLORS.bright}'exit'${COLORS.reset} or ${COLORS.bright}'q'${COLORS.reset} to shut down.\n`);
             
             const userRl = readline.createInterface({
                 input: process.stdin,
@@ -350,7 +493,7 @@ async function main() {
             
             while (true) {
                 const answer = await new Promise((resolve) => {
-                    userRl.question(`${COLORS.bright}${COLORS.white}Ask Agent > ${COLORS.reset}`, resolve);
+                    userRl.question(`${COLORS.bright}${COLORS.white}Ask PC Agent > ${COLORS.reset}`, resolve);
                 });
                 const trimmed = answer.trim();
                 
@@ -359,17 +502,7 @@ async function main() {
                 }
                 if (!trimmed) continue;
                 
-                try {
-                    if (geminiKey && geminiKey !== 'your_gemini_api_key_here') {
-                        await runGemini(geminiKey, trimmed, mcpTools);
-                    } else if (openAIKey && openAIKey !== 'your_openai_api_key_here') {
-                        await runOpenAI(openAIKey, trimmed, mcpTools);
-                    } else {
-                        await runMockAI(trimmed, mcpTools);
-                    }
-                } catch (e) {
-                    logError(`Failed to process request: ${e.message}`);
-                }
+                await runRequest(trimmed);
                 console.log(); // empty spacing line
             }
             userRl.close();

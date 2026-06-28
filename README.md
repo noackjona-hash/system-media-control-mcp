@@ -1,47 +1,52 @@
 # System & Media Control MCP Client/Server (Windows)
 
-Ein Node.js-basiertes Model Context Protocol (MCP) System, mit dem eine Künstliche Intelligenz (wie Google Gemini oder OpenAI) Ihren Windows-PC per natürlicher Sprache steuern und abfragen kann.
-
-A Node.js-based Model Context Protocol (MCP) setup that allows an AI (like Google Gemini or OpenAI) to control and query your Windows PC using natural language.
+A Node.js-based Model Context Protocol (MCP) automation system that enables Artificial Intelligence (Google Gemini, OpenAI, Anthropic Claude, or Local AI models like Ollama/LM Studio) to query and control your Windows PC using natural language.
 
 ---
 
-## 📖 Inhaltsverzeichnis / Table of Contents
+## 📖 Table of Contents
 1. [Features](#-features)
-2. [Funktionsweise / How It Works](#-funktionsweise--how-it-works)
-3. [Systemvoraussetzungen / Prerequisites](#-systemvoraussetzungen--prerequisites)
+2. [How It Works](#-how-it-works)
+3. [Prerequisites](#-prerequisites)
 4. [Installation & Setup](#-installation--setup)
-5. [Konfiguration / Configuration](#%EF%B8%8F-konfiguration--configuration)
-6. [Nutzung / Usage](#-nutzung--usage)
-7. [Verfügbare Tools / Available Tools](#-verf%C3%BCgbare-tools--available-tools)
+5. [Configuration](#%EF%B8%8F-configuration)
+6. [Usage](#-usage)
+7. [Available Tools (16 total)](#-available-tools-16-total)
 
 ---
 
 ## 🌟 Features
 
-### System- & Hardware-Abfragen (System & Hardware Queries)
-* **get_system_status**: CPU-Auslastung, RAM-Verbrauch (GB & %), freier Festplattenspeicher (C:) & System-Uptime.
-* **get_top_processes**: Top 5 ressourcenhungrige Prozesse (instantane CPU-Auslastung).
-* **get_battery_status**: Akkustand, Ladestatus und verbleibende Laufzeit (für Laptops).
-* **get_brightness**: Aktuelle Bildschirmhelligkeit.
+### 💻 System & Resource Monitoring
+* **get_system_status**: CPU load, RAM usage, primary disk (C:) free capacity, and system uptime.
+* **get_top_processes**: Top 5 CPU-intensive running processes with PIDs and CPU percentages.
+* **get_battery_status**: Battery health percentage, charging state, and estimated remaining minutes (laptops).
+* **get_network_info**: Retrieves local IPv4 addresses, active network adapters, Wi-Fi SSID, and external IP.
 
-### PC- & Mediensteuerung (PC & Media Control)
-* **set_brightness**: Bildschirmhelligkeit anpassen (0-100%).
-* **get_volume / set_volume / set_mute**: Lautstärke abfragen, auf bestimmten Wert setzen oder stumm-/lautschalten.
-* **media_control**: Musik abspielen/pausieren, nächsten/vorherigen Titel abspielen oder stoppen (simuliert globale Tastatur-Medientasten).
-* **system_power_control**: PC sperren, in den Ruhezustand (Sleep) versetzen, zeitgesteuert herunterfahren/neu starten (in 60s) oder diese Aktionen abbrechen.
+### 🎛 PC & Media Control
+* **media_control**: Simulates keyboard media keys (Play/Pause, Next Track, Previous Track, Stop).
+* **get_volume / set_volume / set_mute**: Checks system volume level, sets level (0-100), and mutes/unmutes audio.
+* **get_brightness / set_brightness**: Reads or changes monitor brightness (0-100%).
+* **system_power_control**: Locks the screen, puts the PC to sleep, schedules a shutdown/restart (with a 60s warning), or aborts active power schedules.
+
+### 📋 Automation & Clipboard Utilities
+* **get_clipboard**: Reads text contents currently on the Windows clipboard.
+* **set_clipboard**: Copies a text string to the system clipboard.
+* **open_url**: Launches a website URL in the default web browser.
+* **launch_app**: Spawns a desktop application by command name (e.g. `notepad`, `calc`, `explorer`).
+* **show_desktop**: Minimizes all active GUI windows instantly.
 
 ---
 
-## ⚙️ Funktionsweise / How It Works
+## ⚙️ How It Works
 
 ```mermaid
 graph TD
     User([User Prompt]) --> Client[MCP Client - client.js]
-    Client -->|1. Prompt + Tools| LLM[AI API: Gemini / OpenAI]
+    Client -->|1. Prompt + Tools| LLM[AI Provider: Gemini/OpenAI/Claude/Ollama]
     LLM -->|2. Tool Call Request| Client
     Client -->|3. JSON-RPC over stdin| Server[MCP Server - server.js]
-    Server -->|4. Runs Native Powershell/C#| WinAPI[Windows Core Audio / CIM / Keyboard]
+    Server -->|4. Runs Native Powershell/C#| WinAPI[Windows Core Audio / CIM / Clipboard]
     WinAPI -->|5. Output| Server
     Server -->|6. JSON-RPC over stdout| Client
     Client -->|7. Tool Response| LLM
@@ -49,99 +54,107 @@ graph TD
     Client --> Display([Console Display])
 ```
 
-1. **Background Process**: Der Client startet den Server im Hintergrund als Child-Process (`child_process.spawn`).
-2. **JSON-RPC Handshake**: Beim Start wird eine Verbindung aufgebaut und initialisiert (`initialize` und `tools/list`).
-3. **AI integration**: Der Client sendet die Benutzerfrage an die Gemini- oder OpenAI-API und übergibt die Liste der Tools.
-4. **Tool Call & Execution**: Die KI entscheidet, welche Funktion sie benötigt, und gibt einen "Tool Call" zurück. Der Client fängt diesen ab, parst ihn und leitet ihn eins zu eins via `stdin` als JSON-RPC an den Server weiter.
-5. **Windows Integration**: Der Server führt ein Windows-native PowerShell-Skript aus, welches wiederum eine dynamisch kompilierte C#-Klasse nutzt, um direkt auf Windows Core Audio APIs, CIM/WMI-Schnittstellen und das User32-Keyboard zuzugreifen.
-6. **Response Cycle**: Das Ergebnis wird über `stdout` an den Client zurückgeschickt, der es an die KI weiterleitet, damit diese die finale Antwort für den Benutzer formulieren kann.
-7. **Interactive Loop**: Wird der Client ohne Befehlszeilenparameter aufgerufen, startet er einen interaktiven Loop, in dem Sie durchgehend Fragen stellen können, ohne das Programm jedes Mal neu starten zu müssen.
+1. **Background Spawn**: The client runs as a Node.js process and spawns the MCP server as a background process (`child_process.spawn`).
+2. **JSON-RPC handshake**: During startup, they perform a line-by-line handshake over `stdin` and `stdout` using JSON-RPC 2.0.
+3. **AI routing**: The client prompts your chosen AI provider with the user prompt and the server's tools list.
+4. **Tool Call Interception**: When the AI responds with a Tool Call request, the client intercepts it, translates it to a `tools/call` JSON-RPC message, and forwards it to the server's `stdin`.
+5. **Windows Integration**: The server runs native PowerShell command scripts, compiling on-the-fly C# interfaces to bypass the COM binder inside PowerShell, interacting directly with core APIs and user32 keyboard emulation.
+6. **Result Loop**: The tool result is returned over `stdout` to the client, which feeds it back to the AI. The AI then formulates a final user response.
+7. **Interactive loop**: When executed without argument, the client enters a continuous loop where you can chat with the PC Agent.
 
 ---
 
-## 💻 Systemvoraussetzungen / Prerequisites
-* **Betriebssystem**: Windows (erforderlich für Core Audio COM, CIM und User32 APIs).
-* **Runtime**: Node.js v18 oder höher.
+## 💻 Prerequisites
+* **Operating System**: Windows (required for CIM, user32, and COM audio objects).
+* **Runtime**: Node.js v18 or higher.
 
 ---
 
 ## 📦 Installation & Setup
 
-1. Repository klonen / Clone this repository:
+1. Clone this repository:
    ```bash
    git clone https://github.com/noackjona-hash/system-media-control-mcp.git
    cd system-media-control-mcp
    ```
 
-2. Abhängigkeiten installieren / Install dependencies:
+2. Install npm packages:
    ```bash
    npm install
    ```
 
 ---
 
-## ⚙️ Konfiguration / Configuration
+## ⚙️ Configuration
 
-Erstellen Sie eine Datei namens `.env` im Hauptverzeichnis (wird automatisch von Git ignoriert) und tragen Sie Ihren API-Schlüssel ein:
-Create a `.env` file in the root directory (automatically ignored by Git) and enter your API key:
+Create a file named `.env` in the root folder (automatically ignored by git) and set your preferred AI provider:
 
 ```env
-GEMINI_API_KEY=Ihr_Gemini_API_Schluessel_Hier
-# ODER / OR
-OPENAI_API_KEY=Ihr_OpenAI_API_Schluessel_Hier
+# Choose AI Provider: gemini, openai, anthropic, local, mock
+AI_PROVIDER=gemini
+
+# Google Gemini API
+GEMINI_API_KEY=AIzaSy...
+GEMINI_MODEL=gemini-2.5-flash
+
+# OpenAI API
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+
+# Anthropic Claude API
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+
+# Local AI / Ollama / LM Studio (OpenAI-compatible)
+LOCAL_API_BASE=http://localhost:11434/v1
+LOCAL_MODEL=llama3
 ```
-*(Hinweis: Wenn kein Schlüssel konfiguriert ist, startet das Programm im **Mock AI Mode**, der lokal analysiert, welches Tool aufgerufen werden soll. Perfekt zum Testen ohne Internet/Kosten!)*
-*(Note: If no key is set, the client starts in **Mock AI Mode**, simulating tool calls locally. Great for offline testing!)*
+*(If no API keys are found or configured, it defaults to **Mock Mode**, running keyword analysis locally to simulate tool execution. Perfect for offline testing!)*
 
 ---
 
-## 🚀 Nutzung / Usage
+## 🚀 Usage
 
-### Interaktiver Chat-Modus / Interactive Loop (Empfohlen / Recommended)
-Starten Sie den Agenten-Prompt, um fortlaufend Befehle einzugeben:
-Start the agent prompt to enter multiple queries sequentially:
+### Continuous Interactive Chat Loop (Recommended)
+Run the client with no arguments to start a persistent shell session:
 ```bash
 npm start
 ```
+You can chat continuously:
+```text
+Ask PC Agent > How busy is my PC?
+Ask PC Agent > Open github.com
+Ask PC Agent > Mute the volume
+Ask PC Agent > exit
+```
 
-### Einmaliger Befehl / CLI Mode (Single-Shot)
-Übergeben Sie Ihre Frage direkt als Argument auf der Befehlszeile:
-Pass your query directly as a CLI argument:
+### CLI Command Mode (Single-Shot)
+Pass your instruction directly as a command-line argument:
 ```bash
-npm start "Wie ausgelastet ist mein PC?"
-npm start "Stelle die Lautstärke auf 40 Prozent"
-npm start "Pausiere meine Musik"
+npm start "Show my desktop"
+npm start "Copy 'Antigravity' to my clipboard"
+npm start "Check the battery status"
 ```
 
 ---
 
-## 🛠 Verfügbare Tools / Available Tools
+## 🛠 Available Tools
 
-### 1. `get_system_status`
-* **Beschreibung**: Ermittelt CPU-Last, RAM-Verbrauch (Gesamt, Verwendet, Frei, %), primäre Festplattenkapazität (C:) und Systemuptime.
-* **Arguments**: Keine / None
-
-### 2. `get_top_processes`
-* **Beschreibung**: Liefert die Top 5 Prozesse, die die meiste CPU-Last beanspruchen (instantane Auslastung).
-* **Arguments**: Keine / None
-
-### 3. `get_battery_status`
-* **Beschreibung**: Gibt den Ladestand (%), Status (Laden, Entladen, AC) und verbleibende Minuten an.
-* **Arguments**: Keine / None
-
-### 4. `get_brightness` & `set_brightness`
-* **Beschreibung**: Liest die aktuelle Helligkeit aus oder setzt sie auf einen bestimmten Wert.
-* **Arguments (`set_brightness`)**: `level` (Number, 0-100)
-
-### 5. `get_volume` & `set_volume` & `set_mute`
-* **Beschreibung**: Liest die Master-Systemlautstärke aus, setzt sie oder schaltet den Ton stumm/laut.
-* **Arguments (`set_volume`)**: `level` (Number, 0-100)
-* **Arguments (`set_mute`)**: `mute` (Boolean)
-
-### 6. `media_control`
-* **Beschreibung**: Simuliert Tastendrücke für globale Wiedergabesteuerung.
-* **Arguments**: `action` (String Enum: `"play_pause"`, `"next_track"`, `"prev_track"`, `"stop"`)
-
-### 7. `system_power_control`
-* **Beschreibung**: Führt Energiespar- oder Ausschaltaktionen durch.
-* **Arguments**: `action` (String Enum: `"lock"`, `"sleep"`, `"shutdown"`, `"restart"`, `"abort_shutdown"`)
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `get_system_status` | None | Returns CPU load, RAM usage (GB/%), C: disk space, and uptime. |
+| `get_top_processes` | None | Returns the top 5 CPU consuming active processes. |
+| `get_battery_status`| None | Returns charge level (%), charging status, and remaining time. |
+| `get_brightness` | None | Gets current screen brightness percentage. |
+| `set_brightness` | `level` (0-100) | Sets screen brightness to the specified level. |
+| `get_volume` | None | Gets master volume (0-100) and mute status. |
+| `set_volume` | `level` (0-100) | Sets master volume level. |
+| `set_mute` | `mute` (boolean)| Mutes or unmutes system audio. |
+| `media_control` | `action` (string)| Simulates keypress: `play_pause`, `next_track`, `prev_track`, `stop`. |
+| `system_power_control`| `action` (string)| Performs power action: `lock`, `sleep`, `shutdown`, `restart`, `abort_shutdown`. |
+| `get_clipboard` | None | Returns text content on the Windows clipboard. |
+| `set_clipboard` | `text` (string) | Copies the text to the Windows clipboard. |
+| `open_url` | `url` (string) | Opens the URL in the default browser. |
+| `launch_app` | `app` (string) | Launches the application (e.g. `notepad`). |
+| `get_network_info` | None | Returns local IPs, network adapter name, external IP, and SSID. |
+| `show_desktop` | None | Minimizes all active windows to show the desktop. |
