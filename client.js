@@ -219,12 +219,28 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
         }
     }));
 
-    const messages = [{ role: "user", content: query }];
+    const messages = [];
+    if (baseURL) {
+        // Prepend custom system prompt with one-shot example for local TinyLLMs
+        const availableToolNames = mcpTools.map(t => t.name).join(", ");
+        const systemPrompt = `Du bist ein Windows-PC-Systemassistent.
+Verfügbare Tools: ${availableToolNames}
+Wenn der Nutzer die Lautstärke ändern will, antworte AUSSCHLIESSLICH mit: {"name": "set_volume", "arguments": {"level": 50}}
+Verwende dieses JSON-Muster für alle Aktionen. Antworte NUR im JSON-Format!`;
+        messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: query });
+
     let running = true;
     let rePromptAttempts = 0;
     const maxAttempts = 2;
+    let cleanHistoryLength = messages.length;
     
     while (running) {
+        if (rePromptAttempts === 0) {
+            cleanHistoryLength = messages.length;
+        }
+        
         logStep(`Sending request to AI (${modelName})...`);
         const response = await openai.chat.completions.create({
             model: modelName,
@@ -327,6 +343,9 @@ async function runOpenAI(apiKey, query, mcpTools, baseURL = undefined, modelName
                         rePromptAttempts++;
                         logError(`JSON parsing/validation failed: ${parseError.message}`);
                         logStep(`${COLORS.yellow}${COLORS.bright}Malformed tool call from local model. Triggering self-correction prompt (Try ${rePromptAttempts}/${maxAttempts})...${COLORS.reset}`);
+                        
+                        // Rollback to clean state (removes failed assistant message and any previous attempts)
+                        messages.length = cleanHistoryLength;
                         
                         // Push correction instructions containing original user query
                         messages.push({
